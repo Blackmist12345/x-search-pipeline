@@ -216,6 +216,7 @@ def fetch_tweets_from_twitterapi_io(config, processed_ids, search_start_time, se
     raw_total_count = len(raw_tweets_all)
     filtered_tweets = []
     blacklist = config.get("blacklist_words", [])
+    max_text_len = config.get("max_text_length", 1000)
     min_followers = config.get("min_followers_count", 0)
 
     for tweet in raw_tweets_all:
@@ -243,6 +244,11 @@ def fetch_tweets_from_twitterapi_io(config, processed_ids, search_start_time, se
             continue
 
         text_raw = tweet.get("text", "")
+
+        # 本文文字数チェック (1000文字超はAI呼出前スキップ)
+        if len(text_raw) > max_text_len:
+            print(f" ➔ 本文{max_text_len}文字超過 ({len(text_raw)}文字) によりAI呼出前スキップ (ID: {tweet_id})")
+            continue
 
         # 引用元の抽出
         quoted = None
@@ -338,8 +344,8 @@ def analyze_tweet_with_ai(ai_client, tweet, config):
 3. is_tokyo_near: 撮影場所が「{target_areas_str}」のいずれかである場合は true、それ以外または「場所不明」の場合は false としてください。
 4. is_cosplay: 撮影内容が「コスプレ撮影（またはコスプレ併せ・コスプレイベント等）」である場合は true、それ以外のポートレート撮影・ライブ撮影・物撮り・日常撮影・一般イベントなどの場合は false としてください。
 5. shooting_type: なんの撮影であるかを分類・回答してください。なお、コスプレの撮影の場合はポスト本文・画像から『作品名 / キャラクター名』（例: 『コスプレ撮影（原神 / フリーナ）』『コスプレ併せ（チェンソーマン）』など）を特定してください。
-6. is_excluded_genre: コスプレ撮影の場合、以下の除外対象ジャンル（全12作品）に該当するか厳格に判定してください。正式名称だけでなく、略称・隠語・絵文字（例: 🥷, 🌸, 🗡️, 🌟, 🍑, 👹, ⚡, ⚽, 🍎, 🐙, 🦁, 🧪, 🚀, 🌈, 🎤, 🎧, 卍, 🌐, 🔫, 🤞 等）・キャラ名・作品固有用語（本丸, 審神者, ES, NRC, ハーツラビュル, 科学王国, 千空, ナナライ, ディビジョン, 東リベ, 東卍, マイキー, ドラケン, ワートリ, ボーダー, 玉狛, 呪術, 呪術高専, 五条, 領域展開 等）も含めて調査・特定し、該当する場合は true、該当しない場合は false としてください。
-   【除外対象12作品】: 「忍たま乱太郎」「刀剣乱舞」「あんさんぶるスターズ」「桃源暗鬼」「イナズマイレブン」「ツイステッドワンダーランド」「ドクターストーン」「アイドリッシュセブン」「ヒプノシスマイク」「東京リベンジャーズ」「ワールドトリガー」「呪術廻戦」
+6. is_excluded_genre: コスプレ撮影の場合、以下の除外対象ジャンル（全19作品）に該当するか厳格に判定してください。正式名称だけでなく、略称・隠語・絵文字（例: 忍たま, 刀剣/とうらぶ, あんスタ, 桃源暗鬼, イナイレ, ツイステ, ドクスト, アイナナ, ヒプマイ, 東リベ/東卍, ワートリ, 呪術, ブルロ, A3!, 金カム/ゴールデンカムイ, ペルソナ/P5/P4/P3, 鬼灯の冷徹/鬼火の冷徹 等）・キャラ名・作品固有用語（本丸, 審神者, ES, NRC, 科学王国, ナナライ, ディビジョン, マイキー, ボーダー, 領域展開, エゴイスト, 満開開花, 刺青人皮, 怪盗団, 閻魔大王 等）も含めて調査・特定し、該当する場合は true、該当しない場合は false としてください。
+   【除外対象19作品】: 「忍たま乱太郎」「刀剣乱舞」「あんさんぶるスターズ」「桃源暗鬼」「イナズマイレブン」「ツイステッドワンダーランド」「ドクターストーン」「アイドリッシュセブン」「ヒプノシスマイク」「東京リベンジャーズ」「ワールドトリガー」「呪術廻戦」「ブルーロック」「A3!」「ゴールデンカムイ」「ペルソナ5」「ペルソナ4」「ペルソナ3」「鬼灯の冷徹（鬼火の冷徹）」
 7. is_looking_for_photographer: 【本体ポスト】【引用元ポスト】【リプライ元ポスト】のいずれかで、カメラマン・撮影者・同行者を募集（または歓迎）していれば true、募集していない（被写体/レイヤーのみ募集等）場合は false としてください。
 8. is_official_or_job: アコスタ、ココフリ等の企業イベント公式カメラマン募集、または企業・スタジオ等の求人・雇用契約・業務委託募集であれば true、個人の募集であれば false としてください。
 9. is_noise: ゲームのフレンド募集・ギルド募集、音楽ライブ/対バン撮影、または写真撮影と無関係なノイズであれば true、それ以外は false としてください。
@@ -482,7 +488,7 @@ def send_single_email(item, is_test_mode=False, test_hours=0.0):
     
     test_hours_display = "15分" if test_hours == 0.25 else ("30分" if test_hours == 0.5 else f"{int(test_hours) if test_hours.is_integer() else test_hours}時間")
     subject_prefix = f"【テスト実行({test_hours_display})/X募集】" if is_test_mode else "【X募集】"
-    msg['Subject'] = f"{subject_prefix}{location}│{shooting_type} (👥{followers:,}人)"
+    msg['Subject'] = f"{subject_prefix}{location}│{shooting_type} ({followers:,}人)"
 
     tokyo_near_str = "○" if item.get("is_tokyo_near") else "×"
     tweet_id = item.get("tweet_id", "")
@@ -496,13 +502,13 @@ def send_single_email(item, is_test_mode=False, test_hours=0.0):
     tweet_text_html = tweet_text_raw.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
     ocr_text_html = item.get('ocr_text', 'なし').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
 
-    preheader_text = f"[ワード:{matched_kw}] 📝「{tweet_text_clean[:70]}」"
+    preheader_text = f"[ワード:{matched_kw}] 「{tweet_text_clean[:70]}」"
 
     test_banner_html = ""
     if is_test_mode:
         test_banner_html = f"""
         <div style="background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; text-align: center; border: 1px solid #ffeeba;">
-          ⚠️ これは手動テスト実行による通知です（直近{test_hours_display}を重複除外なしで取得）
+          これは手動テスト実行による通知です（直近{test_hours_display}を重複除外なしで取得）
         </div>
         """
 
@@ -511,14 +517,14 @@ def send_single_email(item, is_test_mode=False, test_hours=0.0):
         quoted_web_url = f"https://x.com/i/status/{quoted_id}"
         extra_btns_html += f"""
         <div style="margin-top: 10px;">
-          <a href="{quoted_web_url}" class="btn-secondary" target="_blank">🔗 引用元ポストをXで開く</a>
+          <a href="{quoted_web_url}" class="btn-secondary" target="_blank">引用元ポストをXで開く</a>
         </div>
         """
     if reply_id:
         reply_web_url = f"https://x.com/i/status/{reply_id}"
         extra_btns_html += f"""
         <div style="margin-top: 10px;">
-          <a href="{reply_web_url}" class="btn-secondary" target="_blank">💬 リプライ元（親ポスト）をXで開く</a>
+          <a href="{reply_web_url}" class="btn-secondary" target="_blank">リプライ元（親ポスト）をXで開く</a>
         </div>
         """
 
@@ -646,7 +652,7 @@ def send_single_email(item, is_test_mode=False, test_hours=0.0):
 
       <div class="card">
         {test_banner_html}
-        <div class="header">📍 {location} │ 📸 {shooting_type}</div>
+        <div class="header">{location} │ {shooting_type}</div>
         <ul class="meta-list">
           <li><strong>・投稿者フォロワー数:</strong> {followers:,} 人</li>
           <li><strong>・ヒットした検索ワード:</strong> <span class="badge" style="background-color:#fff5b1; color:#b06000;">{matched_kw}</span></li>
@@ -726,9 +732,8 @@ def send_daily_total_summary_email(daily_stats, target_date_str, display_keyword
     )
 
     top10_html = ""
-    medals = ["🥇", "🥈", "🥉"] + [f"{i}位" for i in range(4, 11)]
     for idx, (kw, s) in enumerate(sorted_kw_list[:10]):
-        rank_str = medals[idx] if idx < len(medals) else f"{idx+1}位"
+        rank_str = f"{idx+1}位"
         top10_html += f"""
         <li style="margin-bottom: 6px; font-size: 13px;">
           <strong>{rank_str} 【{kw}】</strong>: 取得: <strong>{s['fetched']:,}</strong> / 送信: <span style="color:#28a745; font-weight:bold;">{s['sent']:,}</span> / スキップ: {s['skipped']:,}
@@ -738,7 +743,7 @@ def send_daily_total_summary_email(daily_stats, target_date_str, display_keyword
     if not top10_html:
         top10_html = '<li style="color:#586069; font-size:13px;">・前日のヒットはありませんでした。</li>'
 
-    # 全50パターンの定義順一覧
+    # 全84パターンの定義順一覧
     all_kws_html = ""
     for kw in display_keywords:
         s = kw_stats.get(kw, {"fetched": 0, "sent": 0, "skipped": 0, "error": 0})
@@ -824,7 +829,7 @@ def send_daily_total_summary_email(daily_stats, target_date_str, display_keyword
     </head>
     <body>
       <div class="card">
-        <div class="header">📍 前日トータルサマリー ({target_date_str})</div>
+        <div class="header">前日トータルサマリー ({target_date_str})</div>
         <div style="font-size:13px; color:#586069; margin-bottom:15px;">
           前日 24 時間に収集・処理された実績および API 消費金額の総計です。
         </div>
@@ -867,14 +872,14 @@ def send_daily_total_summary_email(daily_stats, target_date_str, display_keyword
           </li>
         </ul>
 
-        <div class="section-title">🏆 前日ヒット数 上位10パターン (TOP 10)</div>
+        <div class="section-title">■ 前日ヒット数 上位10パターン (TOP 10)</div>
         <ul style="padding-left: 20px; font-size:13px; line-height: 1.6; color:#24292e; margin: 8px 0;">
           {top10_html}
         </ul>
 
         <details style="margin-top: 14px; border: 1px solid #e1e4e8; border-radius: 6px; padding: 10px; background-color: #fafbfc;">
           <summary style="font-size: 13.5px; font-weight: bold; color: #0366d6; cursor: pointer; padding: 4px;">
-            📋 検索単語ごとの全処理内訳を表示する (全50パターン)
+            検索単語ごとの全処理内訳を表示する (全84パターン)
           </summary>
           <ul style="padding-left: 18px; margin: 10px 0 0 0; line-height: 1.5;">
             {all_kws_html}
@@ -944,13 +949,13 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
 
     skipped_tweets = summary_data.get("skipped_tweets", [])
 
-    # 優先度順グループ再編成
+    # 優先度順グループ再編成 (絵文字撤去)
     grouped_skipped = {
-        "🌟【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)": [],
-        "📸【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)": [],
-        "🏢【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集": [],
-        "🟪【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/あんスタ/ツイステ等)": [],
-        "🗑️【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集": []
+        "【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)": [],
+        "【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)": [],
+        "【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集": [],
+        "【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/ブルロ/金カム/P5等)": [],
+        "【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集": []
     }
     others = []
     
@@ -962,11 +967,11 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
             others.append(item)
 
     group_configs = [
-        ("🌟【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)", "#e36209", "#fff8f2"),
-        ("📸【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)", "#0366d6", "#f1f8ff"),
-        ("🏢【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集", "#6f42c1", "#fbf0fc"),
-        ("🟪【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/あんスタ/ツイステ等)", "#d73a49", "#ffeef0"),
-        ("🗑️【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集", "#6a737d", "#f6f8fa")
+        ("【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)", "#e36209", "#fff8f2"),
+        ("【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)", "#0366d6", "#f1f8ff"),
+        ("【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集", "#6f42c1", "#fbf0fc"),
+        ("【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/ブルロ/金カム/P5等)", "#d73a49", "#ffeef0"),
+        ("【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集", "#6a737d", "#f6f8fa")
     ]
 
     skipped_html = ""
@@ -1004,13 +1009,13 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
                             <strong>[{total_idx}]</strong> 
                             <span style="background-color: #e2f0fd; color: #0366d6; padding: 2px 6px; border-radius: 4px; font-size:12px; font-weight:bold;">{item.get('matched_keyword', '不明')}</span>
                         </div>
-                        <a href="{item.get('url', '#')}" style="color: #0366d6; text-decoration: none; font-weight:bold; font-size:13px;" target="_blank">🔗 投稿を見る</a>
+                        <a href="{item.get('url', '#')}" style="color: #0366d6; text-decoration: none; font-weight:bold; font-size:13px;" target="_blank">投稿を見る</a>
                     </div>
                     
                     <div style="background-color: #fff9f0; border-left: 3px solid {border_color}; padding: 6px 10px; margin: 6px 0; border-radius: 0 4px 4px 0; font-size: 12.5px;">
-                        <strong>🚫 スキップ理由:</strong> <span style="color: #cb2431; font-weight:bold;">{detailed_reason}</span><br>
-                        <strong>🤖 AI判定結果:</strong> 📸 撮影種別: <strong>{ai_shooting}</strong> │ 📍 判定場所: <strong>{ai_location}</strong><br>
-                        <strong>📝 画像OCR要点:</strong> {ai_ocr}
+                        <strong>スキップ理由:</strong> <span style="color: #cb2431; font-weight:bold;">{detailed_reason}</span><br>
+                        <strong>AI判定結果:</strong> 撮影種別: <strong>{ai_shooting}</strong> │ 判定場所: <strong>{ai_location}</strong><br>
+                        <strong>画像OCR要点:</strong> {ai_ocr}
                     </div>
 
                     <div style="margin-top: 6px; color: #444d56; font-size:12.5px; background-color: #fafbfc; padding: 8px; border-radius: 4px; word-break: break-all;">
@@ -1041,7 +1046,7 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
             <div style="background-color: #ffffff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5;">
                 <strong>[{total_idx}]</strong> <span style="background-color: #e1e4e8; padding: 2px 6px; border-radius: 3px; font-size:12px;">{item.get('matched_keyword', '不明')}</span> 
                 <span style="color:#d73a49; font-weight:bold; font-size:12.5px;">({item.get('reason', '不明')})</span> 
-                <a href="{item.get('url', '#')}" style="color: #0366d6; text-decoration: none; font-weight:bold; font-size:13px; margin-left:8px;" target="_blank">🔗 投稿を見る</a><br>
+                <a href="{item.get('url', '#')}" style="color: #0366d6; text-decoration: none; font-weight:bold; font-size:13px; margin-left:8px;" target="_blank">投稿を見る</a><br>
                 <div style="margin-top: 6px; color: #586069; font-size:12.5px; line-height:1.4;">{tweet_text_safe}</div>
             </div>
             """
@@ -1056,7 +1061,7 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
     if is_test_mode:
         test_banner_html = f"""
         <div style="background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; text-align: center; border: 1px solid #ffeeba;">
-          ⚠️ これは手動テスト実行の結果です（直近{test_hours_display}を重複除外なしで取得）
+          これは手動テスト実行の結果です（直近{test_hours_display}を重複除外なしで取得）
         </div>
         """
 
@@ -1185,7 +1190,7 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
         
         <details style="margin-top: 18px; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px; background-color: #fafbfc;">
           <summary style="font-size: 14.5px; font-weight: bold; color: #cb2431; cursor: pointer; padding: 4px;">
-            ▶ スキップされたポスト一覧を表示する (計 {len(skipped_tweets)} 件)
+            スキップされたポスト一覧を表示する (計 {len(skipped_tweets)} 件)
           </summary>
           <div style="margin-top: 14px;">
             {skipped_html}
@@ -1358,28 +1363,28 @@ def main():
 
                 # 優先度別グループ振り分け
                 if is_cosplay and is_looking and not is_excluded_genre and not is_official_or_job and not is_noise and not is_tokyo_near:
-                    # ① 🌟【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)
-                    group_key = "🌟【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)"
+                    # ① 【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)
+                    group_key = "【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)"
                     reason = "エリア対象外/場所不明"
                     detailed_reason = f"コスプレ撮影ですが対象エリア外または場所不明 (判定: {location_name})"
                 elif not is_cosplay and is_looking and not is_official_or_job and not is_noise:
-                    # ② 📸【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)
-                    group_key = "📸【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)"
+                    # ② 【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)
+                    group_key = "【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)"
                     reason = "撮影種別対象外 (コスプレ以外)"
                     detailed_reason = f"コスプレ以外の個人撮影 ({shooting_type}) / 判定場所: {location_name}"
                 elif is_official_or_job:
-                    # ③ 🏢【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集
-                    group_key = "🏢【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集"
+                    # ③ 【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集
+                    group_key = "【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集"
                     reason = "企業・公式求人"
                     detailed_reason = f"公式イベントカメラマンまたは企業・スタジオ求人募集 ({shooting_type})"
                 elif is_excluded_genre:
-                    # ④ 🟪【除外ジャンル】指定除外作品
-                    group_key = "🟪【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/あんスタ/ツイステ等)"
+                    # ④ 【除外ジャンル】指定除外作品
+                    group_key = "【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/ブルロ/金カム/P5等)"
                     reason = "除外ジャンル該当"
                     detailed_reason = f"除外対象ジャンルに該当 ({shooting_type})"
                 else:
-                    # ⑤ 🗑️【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / カメラマン非募集
-                    group_key = "🗑️【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集"
+                    # ⑤ 【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / カメラマン非募集
+                    group_key = "【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集"
                     if is_noise:
                         reason = "非撮影ノイズ"
                         detailed_reason = f"ゲーム募集・音楽ライブ撮影・非撮影ノイズ ({shooting_type})"
