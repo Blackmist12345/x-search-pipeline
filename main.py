@@ -154,7 +154,7 @@ def fetch_tweets_from_twitterapi_io(config, processed_ids, search_start_time, se
     until_stamp = int(search_end_time.timestamp())
 
     print(f"検索時間枠 (UTC): {search_start_time.isoformat()} 〜 {search_end_time.isoformat()}")
-    print("スマートOR統合検索を実行中 (上限なし完全網羅ページネーション)...")
+    print("スマートOR統合検索を実行中 (全70パターン・上限なし完全網羅ページネーション)...")
     
     for kw in keywords:
         cursor = None
@@ -216,7 +216,7 @@ def fetch_tweets_from_twitterapi_io(config, processed_ids, search_start_time, se
     raw_total_count = len(raw_tweets_all)
     filtered_tweets = []
     blacklist = config.get("blacklist_words", [])
-    max_text_len = config.get("max_text_length", 1000)
+    max_text_len = config.get("max_text_length", 200)
     min_followers = config.get("min_followers_count", 0)
 
     for tweet in raw_tweets_all:
@@ -245,7 +245,7 @@ def fetch_tweets_from_twitterapi_io(config, processed_ids, search_start_time, se
 
         text_raw = tweet.get("text", "")
 
-        # 本文文字数チェック (1000文字超はAI呼出前スキップ)
+        # 本文文字数チェック (200文字超はAI呼出前スキップ)
         if len(text_raw) > max_text_len:
             print(f" ➔ 本文{max_text_len}文字超過 ({len(text_raw)}文字) によりAI呼出前スキップ (ID: {tweet_id})")
             continue
@@ -308,7 +308,7 @@ def fetch_tweets_from_twitterapi_io(config, processed_ids, search_start_time, se
             "id": tweet_id,
             "text": text_raw,
             "author_followers": followers_count,
-            "image_urls": combined_images[:1], # 最重要1枚に厳選
+            "image_urls": combined_images[:1],
             "matched_keyword": matched_specific_kw,
             "quoted_text": quoted_text,
             "quoted_id": quoted_id,
@@ -323,7 +323,7 @@ def analyze_tweet_with_ai(ai_client, tweet, config):
     image_urls = tweet.get("image_urls", [])
 
     parts = []
-    for idx, url in enumerate(image_urls[:1]): # 厳選1枚
+    for idx, url in enumerate(image_urls[:1]):
         try:
             img_resp = requests.get(url, timeout=15)
             if img_resp.status_code == 200:
@@ -743,7 +743,7 @@ def send_daily_total_summary_email(daily_stats, target_date_str, display_keyword
     if not top10_html:
         top10_html = '<li style="color:#586069; font-size:13px;">・前日のヒットはありませんでした。</li>'
 
-    # 全84パターンの定義順一覧
+    # 全70パターンの定義順一覧
     all_kws_html = ""
     for kw in display_keywords:
         s = kw_stats.get(kw, {"fetched": 0, "sent": 0, "skipped": 0, "error": 0})
@@ -879,7 +879,7 @@ def send_daily_total_summary_email(daily_stats, target_date_str, display_keyword
 
         <details style="margin-top: 14px; border: 1px solid #e1e4e8; border-radius: 6px; padding: 10px; background-color: #fafbfc;">
           <summary style="font-size: 13.5px; font-weight: bold; color: #0366d6; cursor: pointer; padding: 4px;">
-            検索単語ごとの全処理内訳を表示する (全84パターン)
+            検索単語ごとの全処理内訳を表示する (全70パターン)
           </summary>
           <ul style="padding-left: 18px; margin: 10px 0 0 0; line-height: 1.5;">
             {all_kws_html}
@@ -925,7 +925,6 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
     total_usd = gemini_usd + twitter_usd
     total_jpy = gemini_jpy + twitter_jpy
 
-    # 検索対象期間（時間数）に基づく月間概算コスト換算 (1日24時間 × 30日)
     period_hours = summary_data.get("period_hours", 1.0)
     if period_hours <= 0:
         period_hours = 1.0
@@ -949,7 +948,6 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
 
     skipped_tweets = summary_data.get("skipped_tweets", [])
 
-    # 優先度順グループ再編成 (絵文字撤去)
     grouped_skipped = {
         "【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)": [],
         "【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)": [],
@@ -981,7 +979,6 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
     for group_name, border_color, bg_color in group_configs:
         items = grouped_skipped[group_name]
         if items:
-            # 2段階多段ソート: ①ヒット単語順 ➔ ②撮影種別順
             items.sort(key=lambda x: (
                 kw_order.get(x.get("matched_keyword", "不明"), 999),
                 x.get("shooting_type", "不明"),
@@ -1001,6 +998,7 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
                 ai_location = item.get('location', '場所不明')
                 ai_ocr = item.get('ocr_text', 'なし')
                 detailed_reason = item.get('detailed_reason', item.get('reason', '不明'))
+                followers = item.get('author_followers', 0)
 
                 skipped_html += f"""
                 <div style="background-color: #ffffff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5;">
@@ -1008,6 +1006,7 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
                         <div>
                             <strong>[{total_idx}]</strong> 
                             <span style="background-color: #e2f0fd; color: #0366d6; padding: 2px 6px; border-radius: 4px; font-size:12px; font-weight:bold;">{item.get('matched_keyword', '不明')}</span>
+                            <span style="color: #586069; font-size: 12px; margin-left: 6px; font-weight: bold;">({followers:,} 人)</span>
                         </div>
                         <a href="{item.get('url', '#')}" style="color: #0366d6; text-decoration: none; font-weight:bold; font-size:13px;" target="_blank">投稿を見る</a>
                     </div>
@@ -1042,11 +1041,17 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
         """
         for item in others:
             tweet_text_safe = item.get('text', '').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
+            followers = item.get('author_followers', 0)
             skipped_html += f"""
             <div style="background-color: #ffffff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5;">
-                <strong>[{total_idx}]</strong> <span style="background-color: #e1e4e8; padding: 2px 6px; border-radius: 3px; font-size:12px;">{item.get('matched_keyword', '不明')}</span> 
-                <span style="color:#d73a49; font-weight:bold; font-size:12.5px;">({item.get('reason', '不明')})</span> 
-                <a href="{item.get('url', '#')}" style="color: #0366d6; text-decoration: none; font-weight:bold; font-size:13px; margin-left:8px;" target="_blank">投稿を見る</a><br>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                    <div>
+                        <strong>[{total_idx}]</strong> <span style="background-color: #e1e4e8; padding: 2px 6px; border-radius: 3px; font-size:12px;">{item.get('matched_keyword', '不明')}</span> 
+                        <span style="color: #586069; font-size: 12px; margin-left: 6px; font-weight: bold;">({followers:,} 人)</span>
+                        <span style="color:#d73a49; font-weight:bold; font-size:12.5px; margin-left:6px;">({item.get('reason', '不明')})</span>
+                    </div>
+                    <a href="{item.get('url', '#')}" style="color: #0366d6; text-decoration: none; font-weight:bold; font-size:13px;" target="_blank">投稿を見る</a>
+                </div>
                 <div style="margin-top: 6px; color: #586069; font-size:12.5px; line-height:1.4;">{tweet_text_safe}</div>
             </div>
             """
@@ -1211,7 +1216,6 @@ def main():
     yesterday_str = (now_jst - timedelta(days=1)).strftime("%Y-%m-%d")
     start_time_str = now_jst.strftime("%H:%M:%S")
 
-    # テストモード判定 (遡り時間: 0.25, 0.5, 1, 2, 4, 8, 16)
     test_hours_str = os.environ.get("TEST_HOURS", "0")
     if "--test" in sys.argv:
         test_hours = 2.0
@@ -1247,7 +1251,6 @@ def main():
      last_daily_summary_date, 
      daily_history) = load_processed_ids("processed_ids.json")
     
-    # テストモードではない場合のみ前日サマリーを送信
     if not is_test_mode and last_daily_summary_date != yesterday_str and yesterday_str in daily_history:
         try:
             print(f"前日 ({yesterday_str}) のトータルサマリーメールを送信中...")
@@ -1345,7 +1348,6 @@ def main():
             location_name = analyzed_data.get("raw_location", "場所不明")
             ocr_text = analyzed_data.get("ocr_text", "なし")
 
-            # 個別通知判定（都内近郊 & コスプレ & カメラマン募集 & 除外ジャンル以外 & 非公式・非求人 & 非ノイズ）
             is_valid_for_notification = (
                 is_looking and 
                 is_tokyo_near and 
@@ -1361,29 +1363,23 @@ def main():
                 reason = ""
                 detailed_reason = ""
 
-                # 優先度別グループ振り分け
                 if is_cosplay and is_looking and not is_excluded_genre and not is_official_or_job and not is_noise and not is_tokyo_near:
-                    # ① 【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)
                     group_key = "【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)"
                     reason = "エリア対象外/場所不明"
                     detailed_reason = f"コスプレ撮影ですが対象エリア外または場所不明 (判定: {location_name})"
                 elif not is_cosplay and is_looking and not is_official_or_job and not is_noise:
-                    # ② 【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)
                     group_key = "【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)"
                     reason = "撮影種別対象外 (コスプレ以外)"
                     detailed_reason = f"コスプレ以外の個人撮影 ({shooting_type}) / 判定場所: {location_name}"
                 elif is_official_or_job:
-                    # ③ 【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集
                     group_key = "【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集"
                     reason = "企業・公式求人"
                     detailed_reason = f"公式イベントカメラマンまたは企業・スタジオ求人募集 ({shooting_type})"
                 elif is_excluded_genre:
-                    # ④ 【除外ジャンル】指定除外作品
                     group_key = "【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/ブルロ/金カム/P5等)"
                     reason = "除外ジャンル該当"
                     detailed_reason = f"除外対象ジャンルに該当 ({shooting_type})"
                 else:
-                    # ⑤ 【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / カメラマン非募集
                     group_key = "【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集"
                     if is_noise:
                         reason = "非撮影ノイズ"
@@ -1400,6 +1396,7 @@ def main():
                     "text": tweet["text"],
                     "url": f"https://x.com/i/status/{tweet['id']}",
                     "matched_keyword": kw,
+                    "author_followers": tweet.get("author_followers", 0),
                     "reason": reason,
                     "detailed_reason": detailed_reason,
                     "shooting_type": shooting_type,
@@ -1457,7 +1454,6 @@ def main():
         daily_history[today_str]["input_tokens"] += total_input_tokens
         daily_history[today_str]["output_tokens"] += total_output_tokens
 
-        # 単語別統計の蓄積
         if "keyword_stats" not in daily_history[today_str]:
             daily_history[today_str]["keyword_stats"] = {}
         for kw, s in keyword_stats.items():
