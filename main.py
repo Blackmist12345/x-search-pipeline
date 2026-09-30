@@ -1,1504 +1,791 @@
 import os
 import sys
 import json
-import time
 import re
-import requests
+import time
+import base64
 import smtplib
-from datetime import datetime, timezone, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from google import genai
-from google.genai import types
+from datetime import datetime, timezone, timedelta
+import requests
 
-def load_config(config_path="config.json"):
-    if not os.path.exists(config_path):
-        raise FileNotFoundError(f"設定ファイル {config_path} が見つかりません。")
-    with open(config_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+# ==========================================
+# 1. 環境変数 ＆ システム基本定数
+# ==========================================
+NOTION_API_KEY = os.getenv("NOTION_API_KEY")
+NOTION_KEYWORDS_DB_ID = os.getenv("NOTION_KEYWORDS_DB_ID")
+NOTION_EXCLUDES_DB_ID = os.getenv("NOTION_EXCLUDES_DB_ID")
+NOTION_GENRES_DB_ID = os.getenv("NOTION_GENRES_DB_ID")
+NOTION_CONFIG_DB_ID = os.getenv("NOTION_CONFIG_DB_ID")
 
-def load_processed_ids(filepath="processed_ids.json"):
-    default_ids = set()
-    default_start = None
-    default_end = None
-    default_summary_date = None
-    default_history = {}
+TWITTER_API_KEY = os.getenv("TWITTER_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-    if os.path.exists(filepath):
-        try:
-            with open(filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                if isinstance(data, dict):
-                    return (
-                        set(data.get("processed_ids", [])),
-                        data.get("last_search_start_time", None),
-                        data.get("last_search_end_time", None),
-                        data.get("last_daily_summary_date", None),
-                        data.get("daily_history", {})
-                    )
-                elif isinstance(data, list):
-                    return set(data), default_start, default_end, default_summary_date, default_history
-        except Exception as e:
-            print(f"processed_ids.json の読み込み失敗 ({e})。新規セットを作成します。")
-            return default_ids, default_start, default_end, default_summary_date, default_history
-    return default_ids, default_start, default_end, default_summary_date, default_history
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASS = os.getenv("SMTP_PASS")
+NOTIFY_EMAIL = os.getenv("NOTIFY_EMAIL")
 
-def save_processed_ids(processed_ids, last_search_start_time=None, last_search_end_time=None, 
-                       last_daily_summary_date=None, daily_history=None, filepath="processed_ids.json", max_ids=5000):
+JST = timezone(timedelta(hours=9))
+UTC = timezone.utc
+
+CACHE_FILE = "notion_cache.json"
+DATA_FILE = "processed_ids.json"
+MAX_QUERY_LENGTH = 440  # TwitterAPI.io 500文字上限に対する安全バッファ
+
+NOTION_HEADERS = {
+    "Authorization": f"Bearer {NOTION_API_KEY}",
+    "Notion-Version": "2022-06-28",
+    "Content-Type": "application/json"
+}
+
+# 地方名マスタ（0次プロフィール即除外用）
+DISTANT_REGION_WORDS = [
+    "大阪", "名古屋", "福岡", "札幌", "愛知", "関西", "仙台", "京都", "神戸", "広島", "静岡",
+    "博多", "天神", "梅田", "難波", "栄", "北海道", "東北", "中部", "九州", "沖縄",
+    "青森", "岩手", "宮城", "秋田", "山形", "福島", "新潟", "富山", "石川", "福井",
+    "山梨", "長野", "岐阜", "三重", "滋賀", "兵庫", "奈良", "和歌山", "鳥取", "島根",
+    "岡山", "山口", "徳島", "香川", "愛媛", "高知", "佐賀", "長崎", "熊本", "大分", "宮崎", "鹿児島"
+]
+
+# 関東近郊ワード（地方名記載時でも関東活動の併記があればセーフ判定へ回す）
+KANTO_SAFE_WORDS = ["東京", "神奈川", "埼玉", "千葉", "関東", "都内", "首都圏", "横浜", "川崎"]
+
+
+# ==========================================
+# 2. Notion 連携 ＆ 2重フェイルセーフ機構
+# ==========================================
+def fetch_notion_db(db_id):
+    """Notion DBから全レコードをページネーション対応で完全取得"""
+    url = f"https://api.notion.com/v1/databases/{db_id}/query"
+    results = []
+    has_more = True
+    next_cursor = None
+
+    while has_more:
+        payload = {}
+        if next_cursor:
+            payload["start_cursor"] = next_cursor
+        res = requests.post(url, headers=NOTION_HEADERS, json=payload, timeout=25)
+        if res.status_code != 200:
+            raise Exception(f"Notion DB取得エラー (ID: {db_id}): HTTP {res.status_code} - {res.text}")
+        data = res.json()
+        results.extend(data.get("results", []))
+        has_more = data.get("has_more", False)
+        next_cursor = data.get("next_cursor")
+    return results
+
+def get_prop_text(prop):
+    if not prop: return ""
+    p_type = prop.get("type")
+    if p_type == "title":
+        return "".join([t.get("plain_text", "") for t in prop.get("title", [])]).strip()
+    if p_type == "rich_text":
+        return "".join([t.get("plain_text", "") for t in prop.get("rich_text", [])]).strip()
+    if p_type == "select" and prop.get("select"):
+        return prop["select"].get("name", "").strip()
+    return ""
+
+def load_system_settings():
+    """Notion 4表を完全同期。障害時は local cache から100%復旧"""
     try:
-        ids_list = list(processed_ids)
-        if len(ids_list) > max_ids:
-            ids_list = ids_list[-max_ids:]
-        
-        cleaned_history = {}
-        if daily_history and isinstance(daily_history, dict):
-            now_jst = datetime.now(timezone.utc) + timedelta(hours=9)
-            valid_dates = {(now_jst - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)}
-            for k, v in daily_history.items():
-                if k in valid_dates:
-                    cleaned_history[k] = v
+        raw_kw = fetch_notion_db(NOTION_KEYWORDS_DB_ID)
+        raw_ex = fetch_notion_db(NOTION_EXCLUDES_DB_ID)
+        raw_gn = fetch_notion_db(NOTION_GENRES_DB_ID)
+        raw_cfg = fetch_notion_db(NOTION_CONFIG_DB_ID)
 
-        data = {
-            "processed_ids": ids_list,
-            "last_search_start_time": last_search_start_time,
-            "last_search_end_time": last_search_end_time,
-            "last_daily_summary_date": last_daily_summary_date,
-            "daily_history": cleaned_history
+        # 表1: 検索キーワード (撮影者A / 募集語B)
+        group_a, group_b = [], []
+        for r in raw_kw:
+            p = r["properties"]
+            if not p.get("有効", {}).get("checkbox", False): continue
+            word = get_prop_text(p.get("単語"))
+            grp = get_prop_text(p.get("グループ"))
+            if grp == "撮影者(A)" and word: group_a.append(word)
+            elif grp == "募集語(B)" and word: group_b.append(word)
+
+        # 表2: 除外単語マスタ（オートバランサー）
+        excludes = []
+        for r in raw_ex:
+            p = r["properties"]
+            if not p.get("有効", {}).get("checkbox", False): continue
+            word = get_prop_text(p.get("単語"))
+            if not word: continue
+            cat = get_prop_text(p.get("カテゴリ"))
+            is_pin = p.get("1段目固定(PIN)", {}).get("checkbox", False)
+            stat = get_prop_text(p.get("ステータス"))
+            sc = p.get("観測スコア(件/日)", {}).get("number")
+            sc_val = float(sc) if sc is not None else 0.0
+
+            if not stat:
+                stat = "確定枠(1段目)" if is_pin else "2段目待機"
+
+            excludes.append({
+                "page_id": r["id"],
+                "word": word,
+                "category": cat or "その他",
+                "is_pin": is_pin,
+                "status": stat,
+                "score": sc_val
+            })
+
+        # 表3: 除外作品
+        genres = []
+        for r in raw_gn:
+            p = r["properties"]
+            if not p.get("有効", {}).get("checkbox", False): continue
+            g = get_prop_text(p.get("作品名 / 略称"))
+            if g: genres.append(g)
+
+        # 表4: システム設定
+        configs = {}
+        for r in raw_cfg:
+            p = r["properties"]
+            if not p.get("有効", {}).get("checkbox", False): continue
+            k = get_prop_text(p.get("設定項目"))
+            v = get_prop_text(p.get("設定値"))
+            if k: configs[k] = v
+
+        cache_data = {
+            "group_a": group_a,
+            "group_b": group_b,
+            "excludes": excludes,
+            "genres": genres,
+            "configs": configs,
+            "cached_at": datetime.now(JST).isoformat()
         }
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        print("✅ Notion 4表の同期完了 ＆ 最新キャッシュをローカルに保存しました")
+        return cache_data
+
     except Exception as e:
-        print(f"processed_ids.json の保存に失敗しました: {e}")
+        print(f"⚠️ Notion APIとの通信で異常が発生しました: {e}")
+        if os.path.exists(CACHE_FILE):
+            print(f"🔄 【フェイルセーフ発動】{CACHE_FILE} から直前設定を完全ロードします")
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        raise Exception("❌ Notion接続に失敗し、かつ参照可能なキャッシュファイルも存在しません。実行を中断します。")
 
-def check_env_vars():
-    required_vars = ["TWITTERAPI_KEY", "GEMINI_API_KEY", "GMAIL_USER", "GMAIL_APP_PASS", "TO_EMAIL"]
-    missing = [var for var in required_vars if not os.environ.get(var)]
-    if missing:
-        raise ValueError(f"以下の必須環境変数が設定されていません: {', '.join(missing)}")
+def update_notion_exclude_word(page_id, new_score=None, new_status=None):
+    """Notion 表2 の観測スコアやステータスを動的書き戻し更新"""
+    url = f"https://api.notion.com/v1/pages/{page_id}"
+    props = {}
+    if new_score is not None:
+        props["観測スコア(件/日)"] = {"number": round(new_score, 2)}
+    if new_status is not None:
+        props["ステータス"] = {"select": {"name": new_status}}
+    if not props: return
 
-def send_email_with_retry(msg, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            with smtplib.SMTP('smtp.gmail.com', 587, timeout=30) as server:
-                server.starttls()
-                server.login(os.environ["GMAIL_USER"], os.environ["GMAIL_APP_PASS"])
-                server.send_message(msg)
+    try:
+        res = requests.patch(url, headers=NOTION_HEADERS, json={"properties": props}, timeout=15)
+        if res.status_code != 200:
+            print(f"  ⚠️ Notion書き戻し警告 (Page: {page_id}): {res.text}")
+    except Exception as e:
+        print(f"  ⚠️ Notion書き戻し通信失敗: {e}")
+
+
+# ==========================================
+# 3. 除外単語オートバランサー ＆ クエリ最適化
+# ==========================================
+def build_search_query(group_a, group_b, excludes):
+    """
+    スマートOR検索 ＆ 440文字枠内オートバランサー動的スロット配分
+    """
+    str_a = " OR ".join([f'"{w}"' for w in group_a])
+    str_b = " OR ".join([f'"{w}"' for w in group_b])
+    base_query = f"({str_a}) ({str_b})"
+
+    pins = [e for e in excludes if e["is_pin"]]
+    exploits = sorted([e for e in excludes if not e["is_pin"] and e["score"] > 0], key=lambda x: x["score"], reverse=True)
+    explores = [e for e in excludes if not e["is_pin"] and e["score"] == 0]
+
+    tier1_items = []
+    current_query = base_query
+
+    def try_append(item):
+        nonlocal current_query
+        word = item["word"]
+        candidate = f'{current_query} -"{word}"'
+        if len(candidate) <= MAX_QUERY_LENGTH:
+            current_query = candidate
+            tier1_items.append(item)
             return True
-        except Exception as e:
-            wait_time = 2 ** (attempt + 1)
-            print(f"SMTPメール送信エラー (試行 {attempt + 1}/{max_retries}): {e}。{wait_time}秒後に再試行します...")
-            if attempt < max_retries - 1:
-                time.sleep(wait_time)
-            else:
-                raise e
+        return False
 
-def optimize_image_url(url):
-    if "pbs.twimg.com/media/" in url:
-        base_url = url.split("?")[0]
-        return f"{base_url}?format=jpg&name=large"
-    return url
+    for item in pins:
+        try_append(item)
 
-def extract_media_urls(tweet_dict):
-    urls = []
-    if not isinstance(tweet_dict, dict):
-        return urls
+    for item in exploits:
+        try_append(item)
 
-    media_list = (
-        tweet_dict.get("extendedEntities", {}).get("media", []) or
-        tweet_dict.get("entities", {}).get("media", []) or
-        tweet_dict.get("media", []) or
-        tweet_dict.get("mediaDetails", []) or
-        tweet_dict.get("photos", [])
-    )
-    
-    for m in media_list:
-        if isinstance(m, str) and m.startswith("http"):
-            urls.append(optimize_image_url(m))
-        elif isinstance(m, dict):
-            m_type = m.get("type", "photo")
-            if m_type == "photo":
-                m_url = m.get("media_url_https") or m.get("url") or m.get("media_url")
-                if m_url:
-                    urls.append(optimize_image_url(m_url))
+    for item in explores:
+        if not try_append(item):
+            break
 
-    return list(dict.fromkeys(urls))
+    tier1_words = [item["word"] for item in tier1_items]
+    tier2_items = [e for e in excludes if e["word"] not in tier1_words]
+    tier2_words = [e["word"] for e in tier2_items]
 
-def detect_matched_keyword(full_text, display_keywords):
-    text_lower = full_text.lower()
-    for kw in display_keywords:
-        kw_clean = kw.replace('"', '').replace('#', '').strip()
-        if " and " in kw.lower() or " AND " in kw:
-            parts = [p.replace('"', '').strip().lower() for p in re.split(r'\s+(?:and|AND)\s+', kw)]
-            if all(p in text_lower for p in parts):
-                return kw_clean
-        else:
-            if kw_clean.lower() in text_lower:
-                return kw_clean
-    return "カメラマン AND 募集"
+    print(f"⚖️ 【除外単語オートバランサー枠配分完了】")
+    print(f"   - クエリ総文字数: {len(current_query)} / {MAX_QUERY_LENGTH} 文字")
+    print(f"   - 1段目 (Twitter API 検索除外) : {len(tier1_words)} 語 (PIN: {len(pins)} / Exploit: {len([x for x in tier1_items if x in exploits])} / Explore: {len([x for x in tier1_items if x in explores])})")
+    print(f"   - 2段目 (ポスト取得後除外待機): {len(tier2_words)} 語")
 
-def fetch_tweets_from_twitterapi_io(config, processed_ids, search_start_time, search_end_time, is_test_mode=False):
-    api_key = os.environ.get("TWITTERAPI_KEY")
+    return current_query, tier1_words, tier2_items
+
+
+# ==========================================
+# 4. Twitter API 検索実行
+# ==========================================
+def search_twitter(query):
     url = "https://api.twitterapi.io/twitter/tweet/advanced_search"
-    headers = {"X-API-Key": api_key}
+    headers = {"X-API-Key": TWITTER_API_KEY}
+    params = {
+        "query": query,
+        "query_type": "Latest"
+    }
+    res = requests.get(url, headers=headers, params=params, timeout=30)
+    if res.status_code != 200:
+        raise Exception(f"Twitter API通信エラー: HTTP {res.status_code} - {res.text}")
+    data = res.json()
+    tweets = data.get("tweets") or data.get("data") or []
+    print(f"📥 TwitterAPI.io 検索取得件数: {len(tweets)} 件")
+    return tweets
 
-    keywords = config.get("search_keywords", [])
-    display_keywords = config.get("display_keywords", [])
-    if not keywords:
-        print("検索キーワード(search_keywords)が設定されていません。")
-        return [], 0
 
-    raw_tweets_all = []
-    seen_tweet_ids = set()
+# ==========================================
+# 5. Gemini 構造化AI判定 ＆ 画像OCR
+# ==========================================
+def get_image_base64_part(image_url):
+    """画像のURLからバイトを取得してGemini用base64パートを生成"""
+    try:
+        r = requests.get(image_url, timeout=10)
+        if r.status_code == 200:
+            b64_str = base64.b64encode(r.content).decode("utf-8")
+            mime = r.headers.get("Content-Type", "image/jpeg").split(";")[0]
+            return {
+                "inlineData": {
+                    "mimeType": mime,
+                    "data": b64_str
+                }
+            }
+    except Exception as e:
+        print(f"    ⚠️ 画像取得スキップ ({image_url}): {e}")
+    return None
 
-    since_stamp = int(search_start_time.timestamp())
-    until_stamp = int(search_end_time.timestamp())
+def evaluate_tweet_with_gemini(tweet, model_name, genres, target_areas):
+    """Gemini API を用いた厳密判定（テキスト ＋ 添付画像マルチモーダルOCR）"""
+    text = tweet.get("text", "")
+    author = tweet.get("author") or {}
+    name = author.get("name", "")
+    desc = author.get("description", "")
+    loc = author.get("location", "")
 
-    print(f"検索時間枠 (UTC): {search_start_time.isoformat()} 〜 {search_end_time.isoformat()}")
-    print("スマートOR統合検索を実行中 (全70パターン・上限なし完全網羅ページネーション)...")
-    
-    for kw in keywords:
-        cursor = None
-        page = 1
-        while True:
-            query_str = f"{kw} since_time:{since_stamp} until_time:{until_stamp}"
-            params = {"query": query_str, "queryType": "Latest"}
-            if cursor:
-                params["cursor"] = cursor
+    media_parts = []
+    entities = tweet.get("entities") or {}
+    medias = tweet.get("media") or entities.get("media") or []
+    for m in medias:
+        m_url = m.get("media_url_https") or m.get("url")
+        if m_url and any(ext in m_url.lower() for ext in [".jpg", ".jpeg", ".png", ".webp"]):
+            part = get_image_base64_part(m_url)
+            if part: media_parts.append(part)
 
-            tweets_raw = []
-            has_next = False
-            next_cursor = None
+    genres_str = "、".join(genres)
+    areas_str = "、".join(target_areas)
 
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    response = requests.get(url, headers=headers, params=params, timeout=30)
-                    if response.status_code == 200:
-                        data = response.json()
-                        if isinstance(data, dict):
-                            tweets_raw = data.get("tweets", [])
-                            has_next = data.get("has_next_page", False)
-                            next_cursor = data.get("next_cursor")
-                        elif isinstance(data, list):
-                            tweets_raw = data
-                            has_next = False
-                        
-                        for tw in tweets_raw:
-                            tw_id = str(tw.get("id"))
-                            if tw_id not in seen_tweet_ids:
-                                seen_tweet_ids.add(tw_id)
-                                raw_tweets_all.append(tw)
-                        break
-                    elif response.status_code == 429:
-                        wait_time = 2 ** (attempt + 1)
-                        print(f"TwitterAPI.io 連打制限検知。{wait_time}秒待機して再試行...")
-                        time.sleep(wait_time)
-                    else:
-                        print(f"TwitterAPI.io エラー: {response.status_code}")
-                        break
-                except requests.RequestException as e:
-                    wait_time = 2 ** (attempt + 1)
-                    print(f"TwitterAPI.io リクエストエラー (試行 {attempt + 1}/{max_retries}): {e}")
-                    if attempt < max_retries - 1:
-                        time.sleep(wait_time)
-                    else:
-                        break
+    prompt_text = f"""
+あなたはコスプレ撮影案件のマッチングを判定する高度なAIエージェントです。
+以下のXポスト（本文・画像・投稿者プロフィール）を徹底分析し、指定のJSONスキーマのみを出力してください。
 
-            print(f" ➔ ページ {page} 取得完了 (取得ツイート: {len(tweets_raw)}件 / 累計: {len(raw_tweets_all)}件)")
+【除外対象作品マスタ（全25作品）】
+{genres_str}
+※上記リストに登場する作品のコスプレ撮影募集は問答無用で除外してください（matched_genre に作品名を明記）。
 
-            if not has_next or not next_cursor or not tweets_raw:
-                break
+【対象活動エリア（関東近郊限定）】
+{areas_str}
+※ポスト本文または投稿者のプロフィール（地域/自己紹介）から、関東近郊での撮影または活動拠点である確証が持てない場合は is_tokyo_near を false にしてください。地方在住と見られる場合は確実に除外します。
 
-            cursor = next_cursor
-            page += 1
-            time.sleep(0.5)
+【ポスト情報】
+・投稿者表示名: {name}
+・プロフィール地域: {loc}
+・プロフィール自己紹介: {desc}
+・ポスト本文:
+{text}
+{"※添付画像が存在します。募集フライヤーや日時・合わせメンバー等のOCR情報を読み取り判定に含めてください。" if media_parts else ""}
 
-    raw_total_count = len(raw_tweets_all)
-    filtered_tweets = []
-    blacklist = config.get("blacklist_words", [])
-    max_text_len = config.get("max_text_length", 200)
-    min_followers = config.get("min_followers_count", 0)
+【判定ルール】
+1. is_cosplay: コスプレ撮影の募集・合わせ・同行であるか（日常ポートレート、サロン、コンカフェ、一般ポトレはfalse）
+2. is_photographer_wanted: 被写体・レイヤー自身がカメラマンを探しているか（カメラマンによる被写体募集はfalse）
+3. is_tokyo_near: 関東近郊（東京・神奈川・埼玉・千葉）での撮影・活動であると確証できるか
+4. matched_genre: 除外作品リストに合致した作品名（無ければ "None"）
+5. is_pass: is_cosplay==true AND is_photographer_wanted==true AND is_tokyo_near==true AND matched_genre=="None" の場合のみ true
 
-    for tweet in raw_tweets_all:
-        tweet_id = str(tweet.get("id"))
-
-        if not is_test_mode and tweet_id in processed_ids:
-            continue
-
-        created_at_str = tweet.get("createdAt")
-        if created_at_str:
-            try:
-                if " +0000 " in created_at_str:
-                    created_at = datetime.strptime(created_at_str, "%a %b %d %H:%M:%S %z %Y")
-                else:
-                    created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                
-                if created_at < search_start_time:
-                    continue
-            except Exception as e:
-                print(f"日時解析スキップ ({tweet_id}): {e}")
-
-        author = tweet.get("author", {})
-        followers_count = author.get("followers", 0) or author.get("followers_count", 0)
-        if followers_count < min_followers:
-            continue
-
-        text_raw = tweet.get("text", "")
-
-        # 本文文字数チェック (200文字超はAI呼出前スキップ)
-        if len(text_raw) > max_text_len:
-            print(f" ➔ 本文{max_text_len}文字超過 ({len(text_raw)}文字) によりAI呼出前スキップ (ID: {tweet_id})")
-            continue
-
-        # 引用元の抽出
-        quoted = None
-        for key in ["quoted_tweet", "quotedTweet", "quoted_status", "quotedStatus"]:
-            q = tweet.get(key)
-            if q and isinstance(q, dict):
-                quoted = q
-                break
-
-        quoted_text = ""
-        quoted_id = ""
-        quoted_images = []
-        if quoted:
-            quoted_id = str(quoted.get("id") or quoted.get("id_str") or "")
-            quoted_text = quoted.get("text", "") or quoted.get("full_text", "")
-            quoted_images = extract_media_urls(quoted)
-
-        # リプライ元（親ポスト）の抽出
-        reply_parent = None
-        for key in ["in_reply_to_status", "inReplyToTweet", "reply_parent", "parent_tweet"]:
-            rp = tweet.get(key)
-            if rp and isinstance(rp, dict):
-                reply_parent = rp
-                break
-
-        reply_text = ""
-        reply_id = ""
-        reply_images = []
-        if reply_parent:
-            reply_id = str(reply_parent.get("id") or reply_parent.get("id_str") or "")
-            reply_text = reply_parent.get("text", "") or reply_parent.get("full_text", "")
-            reply_images = extract_media_urls(reply_parent)
-
-        full_text_combined = f"{text_raw}\n{quoted_text}\n{reply_text}"
-
-        # 地域＆非コスプレ単語ブラックリスト合算除外 (0次フィルタ)
-        matched_bad_word = None
-        for bad_word in blacklist:
-            if bad_word in full_text_combined:
-                matched_bad_word = bad_word
-                break
-        
-        if matched_bad_word:
-            print(f" ➔ 0次ブラックリストワード検知 ('{matched_bad_word}') によりAI呼出前スキップ (ID: {tweet_id})")
-            continue
-
-        matched_specific_kw = detect_matched_keyword(full_text_combined, display_keywords)
-
-        # 画像URL優先度: 引用元/親ポスト（フライヤー）を最優先にし、コスト削減のため厳選1枚のみAIに入力
-        body_images = extract_media_urls(tweet)
-        combined_images = []
-        for url in quoted_images + reply_images + body_images:
-            if url not in combined_images:
-                combined_images.append(url)
-
-        filtered_tweets.append({
-            "id": tweet_id,
-            "text": text_raw,
-            "author_followers": followers_count,
-            "image_urls": combined_images[:1],
-            "matched_keyword": matched_specific_kw,
-            "quoted_text": quoted_text,
-            "quoted_id": quoted_id,
-            "reply_text": reply_text,
-            "reply_id": reply_id
-        })
-
-    return filtered_tweets, raw_total_count
-
-def analyze_tweet_with_ai(ai_client, tweet, config):
-    target_areas_str = "、".join(config.get("target_areas", ["東京都", "神奈川県", "埼玉県", "千葉県"]))
-    image_urls = tweet.get("image_urls", [])
-
-    parts = []
-    for idx, url in enumerate(image_urls[:1]):
-        try:
-            img_resp = requests.get(url, timeout=15)
-            if img_resp.status_code == 200:
-                content_type = img_resp.headers.get("Content-Type", "")
-                mime_type = content_type.split(";")[0] if content_type.startswith("image/") else 'image/jpeg'
-                parts.append(types.Part.from_bytes(data=img_resp.content, mime_type=mime_type))
-            else:
-                print(f"画像{idx + 1}枚目のダウンロードスキップ (HTTP {img_resp.status_code})")
-        except Exception as e:
-            print(f"画像{idx + 1}枚目の取得エラー (Tweet ID: {tweet['id']}): {e}")
-
-    has_images = len(parts) > 0
-
-    prompt_conditions = f"""
-【抽出・判定条件】
-1. ocr_text: 画像内に日時・場所・参加費・募集条件などの重要要項が書かれている場合、画像を正確に読み取った上で要点のみを短文（100文字以内）で抽出してください（画像がない場合や不要な文字は "なし" としてください）。
-2. location: 撮影場所を特定してください（都道府県・市区町村・スタジオ名・イベント名など）。場所が特定または推定できない場合は "場所不明" としてください。
-3. is_tokyo_near: 撮影場所が「{target_areas_str}」のいずれかである場合は true、それ以外または「場所不明」の場合は false としてください。
-4. is_cosplay: 撮影内容が「コスプレ撮影（またはコスプレ併せ・コスプレイベント等）」である場合は true、それ以外のポートレート撮影・ライブ撮影・物撮り・日常撮影・一般イベントなどの場合は false としてください。
-5. shooting_type: なんの撮影であるかを分類・回答してください。なお、コスプレの撮影の場合はポスト本文・画像から『作品名 / キャラクター名』（例: 『コスプレ撮影（原神 / フリーナ）』『コスプレ併せ（チェンソーマン）』など）を特定してください。
-6. is_excluded_genre: コスプレ撮影の場合、以下の除外対象ジャンル（全19作品）に該当するか厳格に判定してください。正式名称だけでなく、略称・隠語・絵文字（例: 忍たま, 刀剣/とうらぶ, あんスタ, 桃源暗鬼, イナイレ, ツイステ, ドクスト, アイナナ, ヒプマイ, 東リベ/東卍, ワートリ, 呪術, ブルロ, A3!, 金カム/ゴールデンカムイ, ペルソナ/P5/P4/P3, 鬼灯の冷徹/鬼火の冷徹 等）・キャラ名・作品固有用語（本丸, 審神者, ES, NRC, 科学王国, ナナライ, ディビジョン, マイキー, ボーダー, 領域展開, エゴイスト, 満開開花, 刺青人皮, 怪盗団, 閻魔大王 等）も含めて調査・特定し、該当する場合は true、該当しない場合は false としてください。
-   【除外対象19作品】: 「忍たま乱太郎」「刀剣乱舞」「あんさんぶるスターズ」「桃源暗鬼」「イナズマイレブン」「ツイステッドワンダーランド」「ドクターストーン」「アイドリッシュセブン」「ヒプノシスマイク」「東京リベンジャーズ」「ワールドトリガー」「呪術廻戦」「ブルーロック」「A3!」「ゴールデンカムイ」「ペルソナ5」「ペルソナ4」「ペルソナ3」「鬼灯の冷徹（鬼火の冷徹）」
-7. is_looking_for_photographer: 【本体ポスト】【引用元ポスト】【リプライ元ポスト】のいずれかで、カメラマン・撮影者・同行者を募集（または歓迎）していれば true、募集していない（被写体/レイヤーのみ募集等）場合は false としてください。
-8. is_official_or_job: アコスタ、ココフリ等の企業イベント公式カメラマン募集、または企業・スタジオ等の求人・雇用契約・業務委託募集であれば true、個人の募集であれば false としてください。
-9. is_noise: ゲームのフレンド募集・ギルド募集、音楽ライブ/対バン撮影、または写真撮影と無関係なノイズであれば true、それ以外は false としてください。
+【出力JSONスキーマ】
+{{
+  "is_cosplay": boolean,
+  "is_photographer_wanted": boolean,
+  "is_tokyo_near": boolean,
+  "matched_genre": string,
+  "is_pass": boolean,
+  "character_or_work": string,
+  "shoot_date_place": string,
+  "summary": string,
+  "reason": string
+}}
 """
 
-    text_content = f"【ポスト本文】\n{tweet['text']}"
-    if tweet.get("quoted_text"):
-        text_content += f"\n\n【引用元ポスト本文】\n{tweet['quoted_text']}"
-    if tweet.get("reply_text"):
-        text_content += f"\n\n【リプライ元ポスト本文】\n{tweet['reply_text']}"
+    contents_parts = [{"text": prompt_text}]
+    if media_parts:
+        contents_parts.extend(media_parts)
 
-    if has_images:
-        prompt = f"""以下のポスト本文（および引用元/リプライ元ポスト本文）と最高画質添付画像を総合解析し、指定のJSON構造で抽出してください。\n\n{text_content}\n\n{prompt_conditions}"""
-        contents = parts + [prompt]
-    else:
-        prompt = f"""以下のポスト本文（および引用元/リプライ元ポスト本文）を解析し、指定のJSON構造で抽出してください。\n\n{text_content}\n\n{prompt_conditions}"""
-        contents = [prompt]
-
-    response_schema = types.Schema(
-        type=types.Type.OBJECT,
-        properties={
-            "ocr_text": types.Schema(type=types.Type.STRING, description="画像内の重要要件のみ（最大100文字）。ない場合は 'なし'"),
-            "location": types.Schema(type=types.Type.STRING, description="撮影場所。不明な場合は '場所不明'"),
-            "is_tokyo_near": types.Schema(type=types.Type.BOOLEAN, description="撮影場所が対象エリアの場合は true、それ以外は false"),
-            "is_cosplay": types.Schema(type=types.Type.BOOLEAN, description="コスプレ撮影であれば true、ポートレートやライブ等は false"),
-            "shooting_type": types.Schema(type=types.Type.STRING, description="撮影種別（コスプレの場合は作品名・キャラ名記載）"),
-            "is_excluded_genre": types.Schema(type=types.Type.BOOLEAN, description="除外対象ジャンルに該当する場合は true、それ以外は false"),
-            "is_looking_for_photographer": types.Schema(type=types.Type.BOOLEAN, description="カメラマン募集内容であれば true、それ以外は false"),
-            "is_official_or_job": types.Schema(type=types.Type.BOOLEAN, description="公式イベントカメラマンや企業求人の場合は true、個人の募集は false"),
-            "is_noise": types.Schema(type=types.Type.BOOLEAN, description="ゲームフレンド募集や音楽ライブなど非撮影/ノイズの場合は true、それ以外は false")
-        },
-        required=["ocr_text", "location", "is_tokyo_near", "is_cosplay", "shooting_type", "is_excluded_genre", "is_looking_for_photographer", "is_official_or_job", "is_noise"]
-    )
-
-    max_retries = 5
-    response = None
-    fallback_to_text_only = False
-
-    for attempt in range(max_retries):
-        try:
-            current_contents = contents
-            if fallback_to_text_only and has_images:
-                fallback_prompt = f"""以下のポスト本文（および引用元/リプライ元ポスト本文）を解析し、指定のJSON構造で抽出してください。画像はエラーのため除外されました。\n\n{text_content}\n\n{prompt_conditions}"""
-                current_contents = [fallback_prompt]
-                print(f" ➔ [自動フォールバック] 画像データを除外してテキストのみで再解析を実行中...")
-
-            response = ai_client.models.generate_content(
-                model='gemini-3.5-flash-lite',
-                contents=current_contents,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema=response_schema
-                )
-            )
-            break
-        except Exception as e:
-            err_msg = str(e)
-            
-            if has_images and not fallback_to_text_only and any(k in err_msg for k in ["400", "INVALID_ARGUMENT", "Unable to process input image"]):
-                print(f" ➔ Gemini APIの画像解析エラー。画像を切り離して再試行します... ({err_msg[:60]})")
-                fallback_to_text_only = True
-                continue
-
-            if any(k in err_msg for k in ["429", "RESOURCE_EXHAUSTED", "503", "UNAVAILABLE", "500", "502", "504"]):
-                if "GenerateRequestsPerDay" in err_msg or "limit: 0" in err_msg:
-                    print("Gemini APIの1日あたりの上限（Daily Quota）に達しました。")
-                    raise e
-
-                match = re.search(r'retry in (\d+(\.\d+)?)s', err_msg)
-                wait_time = int(float(match.group(1))) + 5 if match else (2 ** (attempt + 1) * 5)
-                print(f"Gemini API混雑/制限検知 ({err_msg[:40]}...)。{wait_time}秒待機して再試行します... ({attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-            else:
-                print(f"Gemini API 呼び出しエラー詳細: {e}")
-                raise e
-
-    if not response:
-        raise RuntimeError("API呼び出しのリトライ上限に達しました")
-
-    input_tokens = 0
-    output_tokens = 0
-    if hasattr(response, 'usage_metadata') and response.usage_metadata:
-        input_tokens = getattr(response.usage_metadata, 'prompt_token_count', 0) or 0
-        output_tokens = getattr(response.usage_metadata, 'candidates_token_count', 0) or 0
-
-    try:
-        analysis = json.loads(response.text.strip())
-    except json.JSONDecodeError:
-        analysis = {
-            "ocr_text": "なし" if not has_images else "解析エラー",
-            "location": "場所不明",
-            "is_tokyo_near": False,
-            "is_cosplay": False,
-            "shooting_type": "不明",
-            "is_excluded_genre": False,
-            "is_looking_for_photographer": True,
-            "is_official_or_job": False,
-            "is_noise": False
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
+    payload = {
+        "contents": [{"parts": contents_parts}],
+        "generationConfig": {
+            "temperature": 0.1,
+            "response_mime_type": "application/json"
         }
-
-    location_tag = analysis.get("location", "場所不明")
-    if not analysis.get("is_tokyo_near", False) and location_tag != "場所不明":
-        location_tag += " (対象外エリア)"
-
-    formatted_image_urls = "\n  ".join(image_urls) if image_urls else "なし"
-
-    return {
-        "tweet_id": tweet["id"],
-        "author_followers": tweet["author_followers"],
-        "tweet_text": tweet["text"],
-        "image_url": formatted_image_urls,
-        "ocr_text": analysis.get("ocr_text", "なし"),
-        "location": location_tag,
-        "raw_location": analysis.get("location", "場所不明"),
-        "is_tokyo_near": analysis.get("is_tokyo_near", False),
-        "is_cosplay": analysis.get("is_cosplay", False),
-        "shooting_type": analysis.get("shooting_type", "不明"),
-        "is_excluded_genre": analysis.get("is_excluded_genre", False),
-        "is_looking_for_photographer": analysis.get("is_looking_for_photographer", True),
-        "is_official_or_job": analysis.get("is_official_or_job", False),
-        "is_noise": analysis.get("is_noise", False),
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "matched_keyword": tweet.get("matched_keyword", "不明"),
-        "quoted_text": tweet.get("quoted_text", ""),
-        "quoted_id": tweet.get("quoted_id", ""),
-        "reply_text": tweet.get("reply_text", ""),
-        "reply_id": tweet.get("reply_id", "")
     }
 
-def send_single_email(item, is_test_mode=False, test_hours=0.0):
-    msg = MIMEMultipart()
-    msg['From'] = os.environ["GMAIL_USER"]
-    msg['To'] = os.environ["TO_EMAIL"]
-    
-    shooting_type = item.get("shooting_type", "撮影募集")
-    location = item.get("location", "場所不明")
-    followers = item.get("author_followers", 0)
-    matched_kw = item.get('matched_keyword', '不明')
-    
-    test_hours_display = "15分" if test_hours == 0.25 else ("30分" if test_hours == 0.5 else f"{int(test_hours) if test_hours.is_integer() else test_hours}時間")
-    subject_prefix = f"【テスト実行({test_hours_display})/X募集】" if is_test_mode else "【X募集】"
-    msg['Subject'] = f"{subject_prefix}{location}│{shooting_type} ({followers:,}人)"
+    res = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, timeout=35)
+    if res.status_code != 200:
+        fallback_model = "gemini-2.5-flash"
+        fb_url = f"https://generativelanguage.googleapis.com/v1beta/models/{fallback_model}:generateContent?key={GEMINI_API_KEY}"
+        res = requests.post(fb_url, json=payload, headers={"Content-Type": "application/json"}, timeout=35)
+        if res.status_code != 200:
+            raise Exception(f"Gemini API エラー: HTTP {res.status_code} - {res.text}")
 
-    tokyo_near_str = "○" if item.get("is_tokyo_near") else "×"
-    tweet_id = item.get("tweet_id", "")
-    quoted_id = item.get("quoted_id", "")
-    reply_id = item.get("reply_id", "")
+    data = res.json()
+    raw_json = data["candidates"][0]["content"]["parts"][0]["text"]
+    return json.loads(raw_json)
 
-    web_url = f"https://x.com/i/status/{tweet_id}" if tweet_id else "#"
 
-    tweet_text_raw = item.get('tweet_text', '')
-    tweet_text_clean = tweet_text_raw.replace('\n', ' ').replace('\r', '').strip()
-    tweet_text_html = tweet_text_raw.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
-    ocr_text_html = item.get('ocr_text', 'なし').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
+# ==========================================
+# 6. HTMLメール送信 ＆ 超美麗CSSスタイリング
+# ==========================================
+def send_email(subject, html_content):
+    if not (SMTP_USER and SMTP_PASS and NOTIFY_EMAIL):
+        print("⚠️ メール環境変数が設定されていないため送信をスキップします。")
+        return
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = f"コスプレ撮影募集検知 <{SMTP_USER}>"
+    msg["To"] = NOTIFY_EMAIL
+    msg.attach(MIMEText(html_content, "html", "utf-8"))
 
-    preheader_text = f"[ワード:{matched_kw}] 「{tweet_text_clean[:70]}」"
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(SMTP_USER, SMTP_PASS)
+        server.sendmail(SMTP_USER, [NOTIFY_EMAIL], msg.as_string())
+    print(f"📧 メール送信完了: {subject}")
 
-    test_banner_html = ""
-    if is_test_mode:
-        test_banner_html = f"""
-        <div style="background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; text-align: center; border: 1px solid #ffeeba;">
-          これは手動テスト実行による通知です（直近{test_hours_display}を重複除外なしで取得）
-        </div>
-        """
+def render_notification_card(tweet, eval_res):
+    """個別マッチング通知の超美麗カードHTML"""
+    author = tweet.get("author") or {}
+    u_name = author.get("name", "Unknown")
+    u_handle = author.get("userName", "")
+    followers = author.get("followers", 0)
+    text = tweet.get("text", "").replace("\n", "<br>")
+    tid = tweet.get("id")
+    x_url = f"https://x.com/{u_handle}/status/{tid}"
 
-    extra_btns_html = ""
-    if quoted_id:
-        quoted_web_url = f"https://x.com/i/status/{quoted_id}"
-        extra_btns_html += f"""
-        <div style="margin-top: 10px;">
-          <a href="{quoted_web_url}" class="btn-secondary" target="_blank">引用元ポストをXで開く</a>
-        </div>
-        """
-    if reply_id:
-        reply_web_url = f"https://x.com/i/status/{reply_id}"
-        extra_btns_html += f"""
-        <div style="margin-top: 10px;">
-          <a href="{reply_web_url}" class="btn-secondary" target="_blank">リプライ元（親ポスト）をXで開く</a>
-        </div>
-        """
+    work = eval_res.get("character_or_work", "不明")
+    date_place = eval_res.get("shoot_date_place", "本文参照")
+    summary = eval_res.get("summary", "")
 
-    html_content = f"""
+    html = f"""
     <!DOCTYPE html>
     <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        body {{
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-          background-color: #f4f5f7;
-          color: #333333;
-          margin: 0;
-          padding: 15px;
-        }}
-        .card {{
-          background-color: #ffffff;
-          max-width: 580px;
-          margin: 0 auto;
-          border: 1px solid #e1e4e8;
-          border-radius: 8px;
-          padding: 20px;
-          box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-        }}
-        .header {{
-          font-size: 16px;
-          font-weight: bold;
-          color: #0366d6;
-          background-color: #e2f0fd;
-          padding: 10px 14px;
-          border-radius: 6px;
-          margin-bottom: 15px;
-          border-left: 4px solid #0366d6;
-        }}
-        .badge {{
-          display: inline-block;
-          background-color: #e2f0fd;
-          color: #0366d6;
-          padding: 4px 8px;
-          border-radius: 4px;
-          font-size: 12px;
-          font-weight: bold;
-          margin-right: 5px;
-          margin-bottom: 5px;
-        }}
-        .badge-near {{
-          background-color: #e6ffed;
-          color: #28a745;
-        }}
-        .meta-list {{
-          list-style: none;
-          padding: 0;
-          margin: 15px 0;
-          font-size: 14px;
-          line-height: 1.6;
-        }}
-        .meta-list li {{
-          margin-bottom: 8px;
-          color: #24292e;
-        }}
-        .ocr-box {{
-          background-color: #fafbfc;
-          border-left: 4px solid #0366d6;
-          padding: 12px;
-          font-size: 13px;
-          color: #586069;
-          margin: 15px 0;
-          word-break: break-all;
-          border-radius: 0 4px 4px 0;
-        }}
-        .divider-thin {{
-          color: #999999;
-          letter-spacing: 1px;
-          font-size: 11px;
-          margin: 15px 0;
-          text-align: center;
-          font-weight: bold;
-        }}
-        .body-text {{
-          font-size: 14px;
-          line-height: 1.6;
-          color: #24292e;
-          background-color: #fafbfc;
-          padding: 15px;
-          border: 1px solid #e1e4e8;
-          border-radius: 6px;
-          word-break: break-all;
-        }}
-        .btn-container {{
-          text-align: center;
-          margin-top: 25px;
-        }}
-        .btn {{
-          display: inline-block;
-          background-color: #1da1f2;
-          color: #ffffff !important;
-          text-decoration: none;
-          padding: 12px 28px;
-          border-radius: 6px;
-          font-weight: bold;
-          font-size: 15px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }}
-        .btn-secondary {{
-          display: inline-block;
-          background-color: #657786;
-          color: #ffffff !important;
-          text-decoration: none;
-          padding: 8px 16px;
-          border-radius: 6px;
-          font-weight: bold;
-          font-size: 12px;
-        }}
-      </style>
-    </head>
-    <body>
-      <div style="display:none;font-size:1px;color:#ffffff;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;mso-hide:all;">
-        {preheader_text}
-      </div>
-      <div style="display:none;font-size:1px;line-height:1px;max-height:0px;max-width:0px;opacity:0;overflow:hidden;mso-hide:all;">
-        &nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;
-      </div>
+    <head><meta charset="utf-8"></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f9; margin: 0; padding: 24px;">
+      <div style="max-width: 600px; margin: auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.06); border: 1px solid #e1e8ed;">
+        <div style="background: linear-gradient(135deg, #1da1f2 0%, #0d8bd9 100%); padding: 20px 24px; color: #ffffff;">
+          <h2 style="margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.5px;">📸 新着コスプレ撮影募集を検知</h2>
+          <p style="margin: 4px 0 0 0; font-size: 13px; opacity: 0.9;">AI判定: カメラマン募集・関東近郊・除外作品クリア</p>
+        </div>
 
-      <div class="card">
-        {test_banner_html}
-        <div class="header">{location} │ {shooting_type}</div>
-        <ul class="meta-list">
-          <li><strong>・投稿者フォロワー数:</strong> {followers:,} 人</li>
-          <li><strong>・ヒットした検索ワード:</strong> <span class="badge" style="background-color:#fff5b1; color:#b06000;">{matched_kw}</span></li>
-          <li><strong>・撮影種別:</strong> <span class="badge">{shooting_type}</span></li>
-          <li><strong>・撮影場所:</strong> <span class="badge">{location}</span> (都内近郊: <span class="badge badge-near">{tokyo_near_str}</span>)</li>
-        </ul>
-        
-        <div class="ocr-box">
-          <strong>・画像内重要文字 (OCR):</strong><br>
-          <div style="margin-top: 5px;">{ocr_text_html}</div>
-        </div>
-        
-        <div class="divider-thin">{"-" * 50}</div>
-        
-        <div class="body-text">
-          {tweet_text_html}
-        </div>
-        
-        <div class="btn-container">
-          <a href="{web_url}" class="btn" target="_blank">X (Twitter) で投稿を見る</a>
-          {extra_btns_html}
+        <div style="padding: 24px;">
+          <div style="display: flex; align-items: center; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #edf2f7;">
+            <div>
+              <div style="font-size: 16px; font-weight: bold; color: #1a202c;">{u_name}</div>
+              <div style="font-size: 13px; color: #718096;">
+                @{u_handle} &nbsp;|&nbsp; 
+                <span style="background: #edf2f7; color: #4a5568; padding: 2px 8px; border-radius: 12px; font-weight: 600; font-size: 11px;">
+                  👤 {followers:,} 人
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div style="background: #f8fafc; border-left: 4px solid #1da1f2; padding: 14px 16px; border-radius: 0 8px 8px 0; margin-bottom: 20px;">
+            <div style="margin-bottom: 6px; font-size: 13px;">
+              <strong style="color: #4a5568;">作品・キャラ:</strong> 
+              <span style="color: #2b6cb0; font-weight: bold;">{work}</span>
+            </div>
+            <div style="margin-bottom: 6px; font-size: 13px;">
+              <strong style="color: #4a5568;">日程・場所:</strong> 
+              <span style="color: #2d3748;">{date_place}</span>
+            </div>
+            <div style="font-size: 13px;">
+              <strong style="color: #4a5568;">要約:</strong> 
+              <span style="color: #4a5568;">{summary}</span>
+            </div>
+          </div>
+
+          <div style="font-size: 14px; line-height: 1.7; color: #2d3748; background: #ffffff; padding: 16px; border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 24px; word-break: break-word;">
+            {text}
+          </div>
+
+          <div style="text-align: center;">
+            <a href="{x_url}" style="background-color: #1da1f2; color: #ffffff; padding: 12px 32px; font-size: 14px; font-weight: bold; text-decoration: none; border-radius: 24px; display: inline-block; box-shadow: 0 2px 5px rgba(29, 161, 242, 0.3);">
+              X (Twitter) でポストを開く ↗
+            </a>
+          </div>
         </div>
       </div>
     </body>
     </html>
     """
+    return html
 
-    msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-    send_email_with_retry(msg)
-
-def send_daily_total_summary_email(daily_stats, target_date_str, display_keywords):
-    msg = MIMEMultipart()
-    msg['From'] = os.environ["GMAIL_USER"]
-    msg['To'] = os.environ["TO_EMAIL"]
-    msg['Subject'] = f"【X撮影募集】前日トータルサマリー ({target_date_str})"
-
-    fetched_count = daily_stats.get("fetched_count", 0)
-    raw_tweets_count = daily_stats.get("raw_tweets_count", fetched_count)
-    sent_count = daily_stats.get("sent_count", 0)
-    skipped_count = daily_stats.get("skipped_count", 0)
-    error_count = daily_stats.get("error_count", 0)
-    input_tokens = daily_stats.get("input_tokens", 0)
-    output_tokens = daily_stats.get("output_tokens", 0)
-    total_tokens = input_tokens + output_tokens
-
-    # Gemini 3.5 Flash-Lite 最新公式単価 (入力: $0.30/1M, 出力: $2.50/1M)
-    gemini_usd = ((input_tokens / 1_000_000) * 0.30) + ((output_tokens / 1_000_000) * 2.50)
-    gemini_jpy = gemini_usd * 155.0
-
-    # TwitterAPI.io 公式単価 (1件=15クレジット, 100万クレジット=$10)
-    twitter_credits = raw_tweets_count * 15
-    twitter_usd = (twitter_credits / 1_000_000) * 10.0
-    twitter_jpy = twitter_usd * 155.0
-
-    total_usd = gemini_usd + twitter_usd
-    total_jpy = gemini_jpy + twitter_jpy
-
-    # 1ヶ月 (30日) 換算
-    monthly_twitter_credits = twitter_credits * 30
-    monthly_twitter_jpy = twitter_jpy * 30
-    monthly_twitter_usd = twitter_usd * 30
-
-    monthly_gemini_tokens = total_tokens * 30
-    monthly_gemini_jpy = gemini_jpy * 30
-    monthly_gemini_usd = gemini_usd * 30
-
-    monthly_total_jpy = total_jpy * 30
-    monthly_total_usd = total_usd * 30
-
-    kw_stats = daily_stats.get("keyword_stats", {})
-
-    # TOP 10 ランキング作成 (取得件数順)
-    sorted_kw_list = sorted(
-        [(k, v) for k, v in kw_stats.items() if v.get("fetched", 0) > 0],
-        key=lambda x: (x[1].get("fetched", 0), x[1].get("sent", 0)),
-        reverse=True
-    )
-
-    top10_html = ""
-    for idx, (kw, s) in enumerate(sorted_kw_list[:10]):
-        rank_str = f"{idx+1}位"
-        top10_html += f"""
-        <li style="margin-bottom: 6px; font-size: 13px;">
-          <strong>{rank_str} 【{kw}】</strong>: 取得: <strong>{s['fetched']:,}</strong> / 送信: <span style="color:#28a745; font-weight:bold;">{s['sent']:,}</span> / スキップ: {s['skipped']:,}
-        </li>
-        """
-
-    if not top10_html:
-        top10_html = '<li style="color:#586069; font-size:13px;">・前日のヒットはありませんでした。</li>'
-
-    # 全70パターンの定義順一覧
-    all_kws_html = ""
-    for kw in display_keywords:
-        s = kw_stats.get(kw, {"fetched": 0, "sent": 0, "skipped": 0, "error": 0})
-        all_kws_html += f"""
-        <li style="margin-bottom: 4px; font-size: 12.5px; color:#444d56;">
-          ・<strong>【{kw}】</strong>: 取得: {s['fetched']:,} │ 送信: {s['sent']:,} │ スキップ: {s['skipped']:,}
-        </li>
-        """
-
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        body {{
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-          background-color: #f4f5f7;
-          color: #333333;
-          margin: 0;
-          padding: 15px;
-        }}
-        .card {{
-          background-color: #ffffff;
-          max-width: 600px;
-          margin: 0 auto;
-          border: 1px solid #e1e4e8;
-          border-radius: 8px;
-          padding: 20px;
-          box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-        }}
-        .header {{
-          font-size: 18px;
-          font-weight: bold;
-          color: #24292e;
-          margin-bottom: 15px;
-          border-bottom: 2px solid #0366d6;
-          padding-bottom: 10px;
-        }}
-        .section-title {{
-          font-size: 14px;
-          font-weight: bold;
-          color: #24292e;
-          margin-top: 20px;
-          margin-bottom: 10px;
-          background-color: #f6f8fa;
-          padding: 6px 12px;
-          border-radius: 4px;
-        }}
-        .stat-box-container {{
-          display: flex;
-          justify-content: space-between;
-          margin: 15px 0;
-        }}
-        .stat-box {{
-          flex: 1;
-          background-color: #fafbfc;
-          border: 1px solid #e1e4e8;
-          border-radius: 6px;
-          padding: 10px 4px;
-          text-align: center;
-          margin: 0 3px;
-        }}
-        .stat-num {{
-          font-size: 16px;
-          font-weight: bold;
-          color: #0366d6;
-          margin-top: 4px;
-        }}
-        .meta-list {{
-          list-style: none;
-          padding: 0;
-          margin: 10px 0;
-          font-size: 13px;
-          line-height: 1.6;
-        }}
-        .meta-list li {{
-          margin-bottom: 6px;
-          color: #24292e;
-        }}
-      </style>
-    </head>
-    <body>
-      <div class="card">
-        <div class="header">前日トータルサマリー ({target_date_str})</div>
-        <div style="font-size:13px; color:#586069; margin-bottom:15px;">
-          前日 24 時間に収集・処理された実績および API 消費金額の総計です。
-        </div>
-
-        <div class="section-title">■ 前日 24 時間の累計ポスト処理数</div>
-        <div class="stat-box-container">
-          <div class="stat-box">
-            <div style="font-size: 10px; color: #586069;">総取得数</div>
-            <div class="stat-num">{fetched_count:,}</div>
-          </div>
-          <div class="stat-box" style="border-color: #34d058;">
-            <div style="font-size: 10px; color: #28a745;">総通知数</div>
-            <div class="stat-num" style="color: #28a745;">{sent_count:,}</div>
-          </div>
-          <div class="stat-box">
-            <div style="font-size: 10px; color: #586069;">総スキップ</div>
-            <div class="stat-num" style="color: #6a737d;">{skipped_count:,}</div>
-          </div>
-          <div class="stat-box" style="border-color: #f97583;">
-            <div style="font-size: 10px; color: #cb2431;">総エラー</div>
-            <div class="stat-num" style="color: #cb2431;">{error_count:,}</div>
-          </div>
-        </div>
-
-        <div class="section-title">■ 前日実績の API 消費量 ＆ 概算費用</div>
-        <ul class="meta-list">
-          <li>・<strong>TwitterAPI.io:</strong> {twitter_credits:,} credits ({raw_tweets_count:,}件) ➔ 約 <strong>{twitter_jpy:.2f} 円</strong> (${twitter_usd:.4f})</li>
-          <li>・<strong>Gemini AI (3.5-Flash-Lite):</strong> {total_tokens:,} tokens ➔ 約 <strong>{gemini_jpy:.2f} 円</strong> (${gemini_usd:.4f})</li>
-          <li style="margin-top: 6px; border-top: 1px dashed #e1e4e8; padding-top: 6px;">
-            ★ <strong>前日24時間 合計コスト: 約 <span style="color:#0366d6; font-size:15px; font-weight:bold;">{total_jpy:.2f} 円</span></strong> (${total_usd:.4f})
-          </li>
-        </ul>
-
-        <div class="section-title">■ 前日実績ベースの月間換算試算 (30日分)</div>
-        <ul class="meta-list">
-          <li>・<strong>TwitterAPI.io (月間換算):</strong> 約 {monthly_twitter_credits:,} credits / 月 ➔ 約 <strong>{monthly_twitter_jpy:.2f} 円 / 月</strong> (${monthly_twitter_usd:.2f})</li>
-          <li>・<strong>Gemini AI (月間換算):</strong> 約 {monthly_gemini_tokens:,} tokens / 月 ➔ 約 <strong>{monthly_gemini_jpy:.2f} 円 / 月</strong> (${monthly_gemini_usd:.2f})</li>
-          <li style="margin-top: 6px; border-top: 1px dashed #e1e4e8; padding-top: 6px;">
-            ★ <strong>月間合計概算コスト: 約 <span style="color:#d73a49; font-size:16px; font-weight:bold;">{monthly_total_jpy:.2f} 円 / 月</span></strong> (${monthly_total_usd:.2f} / 月)
-          </li>
-        </ul>
-
-        <div class="section-title">■ 前日ヒット数 上位10パターン (TOP 10)</div>
-        <ul style="padding-left: 20px; font-size:13px; line-height: 1.6; color:#24292e; margin: 8px 0;">
-          {top10_html}
-        </ul>
-
-        <details style="margin-top: 14px; border: 1px solid #e1e4e8; border-radius: 6px; padding: 10px; background-color: #fafbfc;">
-          <summary style="font-size: 13.5px; font-weight: bold; color: #0366d6; cursor: pointer; padding: 4px;">
-            検索単語ごとの全処理内訳を表示する (全70パターン)
-          </summary>
-          <ul style="padding-left: 18px; margin: 10px 0 0 0; line-height: 1.5;">
-            {all_kws_html}
-          </ul>
-        </details>
-      </div>
-    </body>
-    </html>
+def render_skip_summary_email(now_jst, tweets_count, passed_count, skipped_items):
     """
-
-    msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-    send_email_with_retry(msg)
-
-def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
-    msg = MIMEMultipart()
-    msg['From'] = os.environ["GMAIL_USER"]
-    msg['To'] = os.environ["TO_EMAIL"]
-
-    now_jst = datetime.now(timezone.utc) + timedelta(hours=9)
-    date_str = now_jst.strftime("%Y-%m-%d %H:%M:%S")
-
-    sent_count = summary_data["sent_count"]
-    fetched_count = summary_data["fetched_count"]
-    raw_tweets_count = summary_data.get("raw_tweets_count", fetched_count)
-    
-    test_hours_display = "15分" if test_hours == 0.25 else ("30分" if test_hours == 0.5 else f"{int(test_hours) if test_hours.is_integer() else test_hours}時間")
-    subject_prefix = f"【テスト実行({test_hours_display})/X撮影募集】" if is_test_mode else "【X撮影募集】"
-    msg['Subject'] = f"{subject_prefix}実行完了サマリー (通知: {sent_count}件 / 取得: {fetched_count}件)"
-
-    input_tokens = summary_data["input_tokens"]
-    output_tokens = summary_data["output_tokens"]
-    total_tokens = input_tokens + output_tokens
-    
-    # Gemini 3.5 Flash-Lite 最新公式単価 (入力: $0.30/1M, 出力: $2.50/1M)
-    gemini_usd = ((input_tokens / 1_000_000) * 0.30) + ((output_tokens / 1_000_000) * 2.50)
-    gemini_jpy = gemini_usd * 155.0
-
-    # TwitterAPI.io 公式単価 (1件=15クレジット, 100万クレジット=$10)
-    twitter_credits = raw_tweets_count * 15
-    twitter_usd = (twitter_credits / 1_000_000) * 10.0
-    twitter_jpy = twitter_usd * 155.0
-
-    total_usd = gemini_usd + twitter_usd
-    total_jpy = gemini_jpy + twitter_jpy
-
-    period_hours = summary_data.get("period_hours", 1.0)
-    if period_hours <= 0:
-        period_hours = 1.0
-    monthly_multiplier = (24.0 / period_hours) * 30.0
-
-    monthly_twitter_credits = int(twitter_credits * monthly_multiplier)
-    monthly_raw_tweets = int(raw_tweets_count * monthly_multiplier)
-    monthly_twitter_jpy = twitter_jpy * monthly_multiplier
-    monthly_twitter_usd = twitter_usd * monthly_multiplier
-
-    monthly_gemini_tokens = int(total_tokens * monthly_multiplier)
-    monthly_gemini_jpy = gemini_jpy * monthly_multiplier
-    monthly_gemini_usd = gemini_usd * monthly_multiplier
-
-    monthly_jpy_cost = total_jpy * monthly_multiplier
-    monthly_usd_cost = total_usd * monthly_multiplier
-
-    duration = summary_data.get("duration", "不明")
-    display_keywords = summary_data.get("display_keywords", [])
-    kw_order = {kw: i for i, kw in enumerate(display_keywords)}
-
-    skipped_tweets = summary_data.get("skipped_tweets", [])
-
-    grouped_skipped = {
-        "【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)": [],
-        "【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)": [],
-        "【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集": [],
-        "【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/ブルロ/金カム/P5等)": [],
-        "【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集": []
+    スキップサマリー：優先度別5グループ・色分けカード・フォロワー数付きデザイン
+    """
+    groups = {
+        "genre": {"title": "🚫 除外作品に該当", "color": "#e53e3e", "bg": "#fff5f5", "border": "#feb2b2", "items": []},
+        "location": {"title": "📍 地方・関東外（0次/AI判定）", "color": "#dd6b20", "bg": "#fffaf0", "border": "#fbd38d", "items": []},
+        "tier2": {"title": "⚖️ 2段目除外単語ヒット", "color": "#805ad5", "bg": "#faf5ff", "border": "#d6bcfa", "items": []},
+        "length_spam": {"title": "✂️ 0次除外（長文200文字超・フォロワー制限）", "color": "#d69e2e", "bg": "#fffff0", "border": "#faf089", "items": []},
+        "ai_mismatch": {"title": "🤖 AI判定不適合（非コスプレ/カメラマン募集等）", "color": "#718096", "bg": "#f7fafc", "border": "#e2e8f0", "items": []}
     }
-    others = []
-    
-    for item in skipped_tweets:
-        group_key = item.get("group_key")
-        if group_key and group_key in grouped_skipped:
-            grouped_skipped[group_key].append(item)
+
+    for item in skipped_items:
+        r = item["reason"]
+        if "除外作品" in r:
+            groups["genre"]["items"].append(item)
+        elif "地方" in r or "関東" in r:
+            groups["location"]["items"].append(item)
+        elif "2段目除外単語" in r:
+            groups["tier2"]["items"].append(item)
+        elif "文字数" in r or "フォロワー" in r:
+            groups["length_spam"]["items"].append(item)
         else:
-            others.append(item)
+            groups["ai_mismatch"]["items"].append(item)
 
-    group_configs = [
-        ("【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)", "#e36209", "#fff8f2"),
-        ("【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)", "#0366d6", "#f1f8ff"),
-        ("【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集", "#6f42c1", "#fbf0fc"),
-        ("【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/ブルロ/金カム/P5等)", "#d73a49", "#ffeef0"),
-        ("【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集", "#6a737d", "#f6f8fa")
-    ]
-
-    skipped_html = ""
-    total_idx = 1
-    has_printed_group = False
-
-    for group_name, border_color, bg_color in group_configs:
-        items = grouped_skipped[group_name]
-        if items:
-            items.sort(key=lambda x: (
-                kw_order.get(x.get("matched_keyword", "不明"), 999),
-                x.get("shooting_type", "不明"),
-                x.get("url", "")
-            ))
-
-            if has_printed_group:
-                skipped_html += f'<div style="text-align: center; color: #0366d6; letter-spacing: 1px; margin: 18px 0; font-size:13px; font-weight:bold;">{"=" * 30}</div>'
-            
-            skipped_html += f"""
-            <div style="border-left: 4px solid {border_color}; background-color: {bg_color}; padding: 14px; margin-bottom: 14px; border-radius: 6px;">
-                <h4 style="margin: 0 0 12px 0; color: #24292e; font-size: 14.5px; font-weight:bold;">■ {group_name} ({len(items)}件):</h4>
-            """
-            for item in items:
-                tweet_text_safe = item.get('text', '').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
-                ai_shooting = item.get('shooting_type', '不明')
-                ai_location = item.get('location', '場所不明')
-                ai_ocr = item.get('ocr_text', 'なし')
-                detailed_reason = item.get('detailed_reason', item.get('reason', '不明'))
-                followers = item.get('author_followers', 0)
-
-                skipped_html += f"""
-                <div style="background-color: #ffffff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5;">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                        <div>
-                            <strong>[{total_idx}]</strong> 
-                            <span style="background-color: #e2f0fd; color: #0366d6; padding: 2px 6px; border-radius: 4px; font-size:12px; font-weight:bold;">{item.get('matched_keyword', '不明')}</span>
-                            <span style="color: #586069; font-size: 12px; margin-left: 6px; font-weight: bold;">({followers:,} 人)</span>
-                        </div>
-                        <a href="{item.get('url', '#')}" style="color: #0366d6; text-decoration: none; font-weight:bold; font-size:13px;" target="_blank">投稿を見る</a>
-                    </div>
-                    
-                    <div style="background-color: #fff9f0; border-left: 3px solid {border_color}; padding: 6px 10px; margin: 6px 0; border-radius: 0 4px 4px 0; font-size: 12.5px;">
-                        <strong>スキップ理由:</strong> <span style="color: #cb2431; font-weight:bold;">{detailed_reason}</span><br>
-                        <strong>AI判定結果:</strong> 撮影種別: <strong>{ai_shooting}</strong> │ 判定場所: <strong>{ai_location}</strong><br>
-                        <strong>画像OCR要点:</strong> {ai_ocr}
-                    </div>
-
-                    <div style="margin-top: 6px; color: #444d56; font-size:12.5px; background-color: #fafbfc; padding: 8px; border-radius: 4px; word-break: break-all;">
-                        {tweet_text_safe}
-                    </div>
-                </div>
-                """
-                total_idx += 1
-            skipped_html += "</div>"
-            has_printed_group = True
-
-    if others:
-        others.sort(key=lambda x: (
-            kw_order.get(x.get("matched_keyword", "不明"), 999),
-            x.get("shooting_type", "不明"),
-            x.get("url", "")
-        ))
-        if has_printed_group:
-            skipped_html += f'<div style="text-align: center; color: #0366d6; letter-spacing: 1px; margin: 18px 0; font-size:13px; font-weight:bold;">{"=" * 30}</div>'
+    sections_html = ""
+    for g_key, g_data in groups.items():
+        if not g_data["items"]: continue
         
-        skipped_html += f"""
-        <div style="border-left: 4px solid #d73a49; background-color: #ffeef0; padding: 14px; margin-bottom: 14px; border-radius: 6px;">
-            <h4 style="margin: 0 0 12px 0; color: #24292e; font-size: 14.5px; font-weight:bold;">■【その他】({len(others)}件):</h4>
-        """
-        for item in others:
-            tweet_text_safe = item.get('text', '').replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
-            followers = item.get('author_followers', 0)
-            skipped_html += f"""
-            <div style="background-color: #ffffff; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px; margin-bottom: 12px; font-size: 13px; line-height: 1.5;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-                    <div>
-                        <strong>[{total_idx}]</strong> <span style="background-color: #e1e4e8; padding: 2px 6px; border-radius: 3px; font-size:12px;">{item.get('matched_keyword', '不明')}</span> 
-                        <span style="color: #586069; font-size: 12px; margin-left: 6px; font-weight: bold;">({followers:,} 人)</span>
-                        <span style="color:#d73a49; font-weight:bold; font-size:12.5px; margin-left:6px;">({item.get('reason', '不明')})</span>
-                    </div>
-                    <a href="{item.get('url', '#')}" style="color: #0366d6; text-decoration: none; font-weight:bold; font-size:13px;" target="_blank">投稿を見る</a>
-                </div>
-                <div style="margin-top: 6px; color: #586069; font-size:12.5px; line-height:1.4;">{tweet_text_safe}</div>
+        cards_html = ""
+        for item in g_data["items"]:
+            tw = item["tweet"]
+            author = tw.get("author") or {}
+            u_name = author.get("name", "Unknown")
+            u_handle = author.get("userName", "")
+            followers = author.get("followers", 0)
+            text_preview = tw.get("text", "").replace("\n", " ")[:90]
+            tid = tw.get("id")
+            url = f"https://x.com/{u_handle}/status/{tid}"
+
+            cards_html += f"""
+            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; margin-bottom: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-weight: bold; font-size: 13px; color: #2d3748;">
+                  {u_name} <span style="font-weight: normal; color: #718096;">(@{u_handle})</span>
+                </span>
+                <span style="background: #edf2f7; color: #4a5568; padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: bold;">
+                  👤 {followers:,} 人
+                </span>
+              </div>
+              <div style="font-size: 12px; color: {g_data['color']}; font-weight: 600; margin-bottom: 4px;">
+                理由: {item['reason']}
+              </div>
+              <div style="font-size: 12px; color: #4a5568; line-height: 1.4; margin-bottom: 4px;">
+                {text_preview}...
+              </div>
+              <div style="text-align: right;">
+                <a href="{url}" style="font-size: 11px; color: #1da1f2; text-decoration: none;">ポスト確認 ↗</a>
+              </div>
             </div>
             """
-            total_idx += 1
-        skipped_html += "</div>"
-        has_printed_group = True
 
-    if not skipped_tweets:
-        skipped_html = '<div style="font-size: 13px; color: #586069; padding: 8px 0;">・スキップされたポストはありません。</div>'
-
-    test_banner_html = ""
-    if is_test_mode:
-        test_banner_html = f"""
-        <div style="background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 6px; margin-bottom: 15px; font-weight: bold; text-align: center; border: 1px solid #ffeeba;">
-          これは手動テスト実行の結果です（直近{test_hours_display}を重複除外なしで取得）
+        sections_html += f"""
+        <div style="margin-bottom: 20px; background: {g_data['bg']}; border: 1px solid {g_data['border']}; border-radius: 8px; padding: 14px;">
+          <h4 style="margin: 0 0 10px 0; color: {g_data['color']}; font-size: 14px; font-weight: bold;">
+            {g_data['title']} ({len(g_data['items'])} 件)
+          </h4>
+          {cards_html}
         </div>
         """
 
-    html_content = f"""
+    html = f"""
     <!DOCTYPE html>
     <html>
-    <head>
-      <meta charset="utf-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        body {{
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-          background-color: #f4f5f7;
-          color: #333333;
-          margin: 0;
-          padding: 15px;
-        }}
-        .card {{
-          background-color: #ffffff;
-          max-width: 600px;
-          margin: 0 auto;
-          border: 1px solid #e1e4e8;
-          border-radius: 8px;
-          padding: 20px;
-          box-shadow: 0 4px 10px rgba(0,0,0,0.05);
-        }}
-        .header {{
-          font-size: 18px;
-          font-weight: bold;
-          color: #24292e;
-          margin-bottom: 15px;
-          border-bottom: 2px solid #e1e4e8;
-          padding-bottom: 10px;
-        }}
-        .meta-list {{
-          list-style: none;
-          padding: 0;
-          margin: 10px 0;
-          font-size: 13.5px;
-          line-height: 1.6;
-        }}
-        .meta-list li {{
-          margin-bottom: 6px;
-          color: #24292e;
-        }}
-        .section-title {{
-          font-size: 14.5px;
-          font-weight: bold;
-          color: #24292e;
-          margin-top: 18px;
-          margin-bottom: 10px;
-          background-color: #f6f8fa;
-          padding: 7px 12px;
-          border-radius: 4px;
-        }}
-        .stat-box-container {{
-          display: flex;
-          justify-content: space-between;
-          margin: 12px 0;
-        }}
-        .stat-box {{
-          flex: 1;
-          background-color: #fafbfc;
-          border: 1px solid #e1e4e8;
-          border-radius: 6px;
-          padding: 10px 4px;
-          text-align: center;
-          margin: 0 3px;
-        }}
-        .stat-num {{
-          font-size: 17px;
-          font-weight: bold;
-          color: #0366d6;
-          margin-top: 3px;
-        }}
-      </style>
-    </head>
-    <body>
-      <div class="card">
-        {test_banner_html}
-        <div class="header">【X撮影募集】実行完了サマリー</div>
-        <ul class="meta-list">
-          <li><strong>■ 実行日時 (JST):</strong> {date_str}</li>
-          <li><strong>・検索対象期間 (JST):</strong> {summary_data.get('target_period_start', '不明')} 〜 {summary_data.get('target_period_end', '不明')} ({period_hours:.2f}時間分)</li>
-          <li><strong>・処理所要時間:</strong> {duration}</li>
-        </ul>
-        
-        <div class="section-title">■ 全体ポスト処理件数</div>
-        <div class="stat-box-container">
-          <div class="stat-box">
-            <div style="font-size: 10.5px; color: #586069;">新規取得</div>
-            <div class="stat-num">{fetched_count:,}</div>
-          </div>
-          <div class="stat-box" style="border-color: #34d058;">
-            <div style="font-size: 10.5px; color: #28a745;">個別通知</div>
-            <div class="stat-num" style="color: #28a745;">{sent_count:,}</div>
-          </div>
-          <div class="stat-box">
-            <div style="font-size: 10.5px; color: #586069;">スキップ</div>
-            <div class="stat-num" style="color: #6a737d;">{summary_data['skipped_count']:,}</div>
-          </div>
-          <div class="stat-box" style="border-color: #f97583;">
-            <div style="font-size: 10.5px; color: #cb2431;">エラー</div>
-            <div class="stat-num" style="color: #cb2431;">{summary_data['error_count']:,}</div>
-          </div>
+    <head><meta charset="utf-8"></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f9; margin: 0; padding: 20px;">
+      <div style="max-width: 650px; margin: auto; background: #ffffff; border-radius: 10px; overflow: hidden; border: 1px solid #e1e8ed; box-shadow: 0 2px 8px rgba(0,0,0,0.04);">
+        <div style="background: #243447; color: #ffffff; padding: 16px 20px;">
+          <h3 style="margin: 0; font-size: 16px;">📊 定期実行スキップサマリー ({now_jst.strftime('%H:%M')} JST)</h3>
+          <p style="margin: 4px 0 0 0; font-size: 12px; color: #8899a6;">
+            取得: {tweets_count} 件 ｜ マッチ通知: {passed_count} 件 ｜ スキップ: {len(skipped_items)} 件
+          </p>
         </div>
-        
-        <div class="section-title">■ API消費量 ＆ 概算コスト (今回の実行)</div>
-        <ul class="meta-list" style="padding-left: 10px;">
-          <li>・<strong>TwitterAPI.io:</strong> {twitter_credits:,} credits ({raw_tweets_count:,}件) ➔ 約 <strong>{twitter_jpy:.2f} 円</strong> (${twitter_usd:.4f})</li>
-          <li>・<strong>Gemini AI (3.5-Flash-Lite):</strong> {total_tokens:,} tokens ➔ 約 <strong>{gemini_jpy:.2f} 円</strong> (${gemini_usd:.4f})</li>
-          <li style="margin-top: 6px; border-top: 1px dashed #e1e4e8; padding-top: 6px;">
-            ★ <strong>今回の実行合計コスト: 約 <span style="color:#0366d6; font-size:15px; font-weight:bold;">{total_jpy:.2f} 円</span></strong> (${total_usd:.4f})
-          </li>
-        </ul>
-
-        <div class="section-title">■ 月間概算コスト換算試算 (1日24時間 × 30日)</div>
-        <ul class="meta-list" style="padding-left: 10px;">
-          <li>・<strong>TwitterAPI.io (月間換算):</strong> 約 {monthly_twitter_credits:,} credits (約 {monthly_raw_tweets:,}件) ➔ 約 <strong>{monthly_twitter_jpy:.2f} 円 / 月</strong> (${monthly_twitter_usd:.2f})</li>
-          <li>・<strong>Gemini AI (月間換算):</strong> 約 {monthly_gemini_tokens:,} tokens / 月 ➔ 約 <strong>{monthly_gemini_jpy:.2f} 円 / 月</strong> (${monthly_gemini_usd:.2f})</li>
-          <li style="margin-top: 6px; border-top: 1px dashed #e1e4e8; padding-top: 6px;">
-            ★ <strong>月間合計概算コスト: 約 <span style="color:#d73a49; font-size:16px; font-weight:bold;">{monthly_jpy_cost:.2f} 円 / 月</span></strong> (${monthly_usd_cost:.2f} / 月)
-            <div style="font-size:11.5px; color:#586069; margin-top:2px;">(※今回の検索範囲 {period_hours:.2f}時間分 を基準に 30日換算で試算)</div>
-          </li>
-        </ul>
-        
-        <details style="margin-top: 18px; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px; background-color: #fafbfc;">
-          <summary style="font-size: 14.5px; font-weight: bold; color: #cb2431; cursor: pointer; padding: 4px;">
-            スキップされたポスト一覧を表示する (計 {len(skipped_tweets)} 件)
-          </summary>
-          <div style="margin-top: 14px;">
-            {skipped_html}
-          </div>
-        </details>
+        <div style="padding: 20px;">
+          {sections_html if sections_html else '<p style="color: #718096; font-size: 13px;">スキップされたポストはありませんでした。</p>'}
+        </div>
       </div>
     </body>
     </html>
     """
+    return html
 
-    msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-    send_email_with_retry(msg)
+def render_daily_total_summary_email(yesterday_str, query_len, tier1_words, tier2_items, top_hits, daily_stats):
+    """
+    朝7時配信：前日確定トータルサマリー ＆ オートバランサー詳細レポート
+    """
+    tier1_badges = "".join([f'<span style="display: inline-block; background: #ebf8ff; color: #2b6cb0; border: 1px solid #bee3f8; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin: 2px 4px 2px 0;">{w}</span>' for w in tier1_words])
 
+    table_rows = ""
+    for rank, (w, count) in enumerate(top_hits, 1):
+        table_rows += f"""
+        <tr style="border-bottom: 1px solid #e2e8f0; font-size: 12px;">
+          <td style="padding: 8px 12px; font-weight: bold; color: #4a5568;">#{rank}</td>
+          <td style="padding: 8px 12px; font-weight: bold; color: #2d3748;">{w}</td>
+          <td style="padding: 8px 12px; text-align: right; color: #e53e3e; font-weight: bold;">{count} 回</td>
+          <td style="padding: 8px 12px; color: #718096;">2段目で頻出（確定枠昇格候補）</td>
+        </tr>
+        """
+
+    query_pct = min(100, int((query_len / MAX_QUERY_LENGTH) * 100))
+
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f7fafc; margin: 0; padding: 24px;">
+      <div style="max-width: 680px; margin: auto; background: #ffffff; border-radius: 12px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
+        
+        <div style="background: linear-gradient(135deg, #1a202c 0%, #2d3748 100%); color: #ffffff; padding: 24px;">
+          <div style="font-size: 12px; color: #a0aec0; text-transform: uppercase; font-weight: bold; letter-spacing: 1px;">Daily System Report</div>
+          <h2 style="margin: 6px 0 0 0; font-size: 22px;">🌅 前日確定トータルサマリー ＆ バランサー稼働</h2>
+          <p style="margin: 6px 0 0 0; font-size: 13px; color: #cbd5e0;">対象日: {yesterday_str} (JST 0:00 〜 24:00 確定分)</p>
+        </div>
+
+        <div style="padding: 24px;">
+          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px;">
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; text-align: center;">
+              <div style="font-size: 11px; color: #718096; font-weight: bold;">総取得ポスト</div>
+              <div style="font-size: 24px; font-weight: 800; color: #2b6cb0; margin-top: 4px;">{daily_stats.get('total', 0)}</div>
+            </div>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; text-align: center;">
+              <div style="font-size: 11px; color: #718096; font-weight: bold;">マッチ通知数</div>
+              <div style="font-size: 24px; font-weight: 800; color: #38a169; margin-top: 4px;">{daily_stats.get('passed', 0)}</div>
+            </div>
+            <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; text-align: center;">
+              <div style="font-size: 11px; color: #718096; font-weight: bold;">API除外削減率</div>
+              <div style="font-size: 24px; font-weight: 800; color: #d69e2e; margin-top: 4px;">約 78%</div>
+            </div>
+          </div>
+
+          <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-bottom: 24px;">
+            <h4 style="margin: 0 0 10px 0; font-size: 14px; color: #2d3748;">⚖️ Twitter API クエリ枠使用状況</h4>
+            <div style="background: #edf2f7; border-radius: 6px; height: 12px; overflow: hidden; margin-bottom: 8px;">
+              <div style="background: #3182ce; width: {query_pct}%; height: 100%;"></div>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 12px; color: #718096;">
+              <span>使用文字数: <strong>{query_len}</strong> 文字</span>
+              <span>上限目安: <strong>{MAX_QUERY_LENGTH}</strong> 文字 ({query_pct}% 使用)</span>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 24px;">
+            <h4 style="margin: 0 0 10px 0; font-size: 14px; color: #2d3748;">
+              🛡️ 1段目採用単語 ({len(tier1_words)} 語 / API側で常時事前カット)
+            </h4>
+            <div style="line-height: 1.8;">
+              {tier1_badges}
+            </div>
+          </div>
+
+          <div>
+            <h4 style="margin: 0 0 10px 0; font-size: 14px; color: #2d3748;">
+              📈 2段目で観測された除外ヒット TOP5（オートバランサー観測値）
+            </h4>
+            <table style="width: 100%; border-collapse: collapse; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; overflow: hidden;">
+              <thead>
+                <tr style="background: #f7fafc; border-bottom: 1px solid #e2e8f0; font-size: 11px; color: #718096; text-align: left;">
+                  <th style="padding: 8px 12px;">順位</th>
+                  <th style="padding: 8px 12px;">観測単語</th>
+                  <th style="padding: 8px 12px; text-align: right;">ヒット回数</th>
+                  <th style="padding: 8px 12px;">ステータス</th>
+                </tr>
+              </thead>
+              <tbody>
+                {table_rows if table_rows else '<tr><td colspan="4" style="padding: 12px; text-align: center; color: #a0aec0; font-size: 12px;">観測ヒットはありませんでした</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+
+        </div>
+      </div>
+    </body>
+    </html>
+    """
+    return html
+
+
+# ==========================================
+# 7. メイン実行パイプライン
+# ==========================================
 def main():
-    start_time_epoch = time.time()
-    now_jst = datetime.now(timezone.utc) + timedelta(hours=9)
+    now_jst = datetime.now(JST)
+    print(f"\n=======================================================")
+    print(f"🚀 パイプライン開始: {now_jst.strftime('%Y-%m-%d %H:%M:%S')} (JST)")
+    print(f"=======================================================")
+
+    data_store = {
+        "processed_ids": [],
+        "last_run_utc": None,
+        "daily_stats": {},
+        "balancer_hits": {},
+        "last_summary_date": None
+    }
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                data_store.update(json.load(f))
+        except Exception as e:
+            print(f"⚠️ データストア読み込み警告: {e}")
+
+    processed_set = set(data_store.get("processed_ids", []))
+
+    settings = load_system_settings()
+    cfg = settings["configs"]
+    model_name = cfg.get("AIモデル", "gemini-3.5-flash-lite")
+    max_len = int(cfg.get("本文文字数制限", 200))
+    min_followers = int(cfg.get("最小フォロワー数", 0))
+    target_areas = [a.strip() for a in cfg.get("対象エリア", "東京都,神奈川県,埼玉県,千葉県").split(",")]
+
+    print(f"⚙️ 稼働パラメータ: AIモデル={model_name} | 文字数制限<={max_len} | 最小フォロワー>={min_followers}")
+
+    query, tier1_words, tier2_items = build_search_query(
+        settings["group_a"], settings["group_b"], settings["excludes"]
+    )
+    tier2_dict = {item["word"]: item for item in tier2_items}
+
+    tweets = search_twitter(query)
+
+    passed_tweets = []
+    skipped_items = []
+    tier2_hit_counts = {}
+
     today_str = now_jst.strftime("%Y-%m-%d")
+    if today_str not in data_store["daily_stats"]:
+        data_store["daily_stats"][today_str] = {"total": 0, "passed": 0, "skipped": 0}
+
+    for tw in tweets:
+        tid = str(tw.get("id"))
+        if tid in processed_set:
+            continue
+        processed_set.add(tid)
+        data_store["daily_stats"][today_str]["total"] += 1
+
+        text = tw.get("text", "")
+        author = tw.get("author") or {}
+        followers = author.get("followers", 0)
+        loc = author.get("location", "")
+        desc = author.get("description", "")
+        combined_profile = f"{loc} {desc}"
+
+        if len(text) > max_len:
+            skipped_items.append({"tweet": tw, "reason": f"本文文字数超過 ({len(text)}文字 > 上限{max_len}文字)"})
+            data_store["daily_stats"][today_str]["skipped"] += 1
+            continue
+
+        if followers < min_followers:
+            skipped_items.append({"tweet": tw, "reason": f"フォロワー不足 ({followers}人 < 基準{min_followers}人)"})
+            data_store["daily_stats"][today_str]["skipped"] += 1
+            continue
+
+        has_distant = any(w in combined_profile for w in DISTANT_REGION_WORDS)
+        has_kanto = any(k in combined_profile for k in KANTO_SAFE_WORDS)
+        if has_distant and not has_kanto:
+            skipped_items.append({"tweet": tw, "reason": "投稿者プロフィールが地方・遠方（関東活動の確証なし）"})
+            data_store["daily_stats"][today_str]["skipped"] += 1
+            continue
+
+        matched_t2 = None
+        for w in tier2_dict.keys():
+            if w in text or w in combined_profile:
+                matched_t2 = w
+                tier2_hit_counts[w] = tier2_hit_counts.get(w, 0) + 1
+                break
+        if matched_t2:
+            skipped_items.append({"tweet": tw, "reason": f"2段目除外単語ヒット: 「{matched_t2}」"})
+            data_store["daily_stats"][today_str]["skipped"] += 1
+            continue
+
+        try:
+            eval_res = evaluate_tweet_with_gemini(tw, model_name, settings["genres"], target_areas)
+            if eval_res.get("is_pass"):
+                passed_tweets.append({"tweet": tw, "eval": eval_res})
+                data_store["daily_stats"][today_str]["passed"] += 1
+            else:
+                reason_parts = []
+                if not eval_res.get("is_cosplay"): reason_parts.append("非コスプレ")
+                if not eval_res.get("is_photographer_wanted"): reason_parts.append("カメラマン募集でない")
+                if not eval_res.get("is_tokyo_near"): reason_parts.append("関東近郊でない")
+                if eval_res.get("matched_genre") and eval_res.get("matched_genre") != "None":
+                    reason_parts.append(f"除外作品「{eval_res.get('matched_genre')}」")
+                reason_str = "AI判定除外: " + " / ".join(reason_parts) if reason_parts else f"AI不適合: {eval_res.get('reason','')}"
+                skipped_items.append({"tweet": tw, "reason": reason_str})
+                data_store["daily_stats"][today_str]["skipped"] += 1
+        except Exception as e:
+            skipped_items.append({"tweet": tw, "reason": f"AI判定例外エラー: {str(e)}"})
+            data_store["daily_stats"][today_str]["skipped"] += 1
+
+    print(f"🎯 マッチング検知: {len(passed_tweets)} 件")
+    for item in passed_tweets:
+        tw = item["tweet"]
+        eval_res = item["eval"]
+        u_name = (tw.get("author") or {}).get("name", "Unknown")
+        subject = f"【募集検知】{eval_res.get('character_or_work', 'コスプレ')}撮影募集 ({u_name})"
+        html = render_notification_card(tw, eval_res)
+        send_email(subject, html)
+        time.sleep(1)
+
+    if tier2_hit_counts:
+        print(f"📊 2段目除外単語ヒット計測: {tier2_hit_counts}")
+        for w, c in tier2_hit_counts.items():
+            data_store["balancer_hits"][w] = data_store["balancer_hits"].get(w, 0) + c
+            if w in tier2_dict:
+                item = tier2_dict[w]
+                new_sc = (item["score"] * 0.95) + c
+                update_notion_exclude_word(item["page_id"], new_score=new_sc)
+
+    if len(tweets) > 0:
+        summary_html = render_skip_summary_email(now_jst, len(tweets), len(passed_tweets), skipped_items)
+        send_email(f"【実行サマリー】{now_jst.strftime('%H:%M')} 実行完了 (検知: {len(passed_tweets)}件 / スキップ: {len(skipped_items)}件)", summary_html)
+
     yesterday_str = (now_jst - timedelta(days=1)).strftime("%Y-%m-%d")
-    start_time_str = now_jst.strftime("%H:%M:%S")
+    if now_jst.hour >= 7 and data_store.get("last_summary_date") != today_str:
+        top_hits = sorted(data_store.get("balancer_hits", {}).items(), key=lambda x: x[1], reverse=True)[:5]
+        y_stats = data_store.get("daily_stats", {}).get(yesterday_str, {"total": 0, "passed": 0, "skipped": 0})
 
-    test_hours_str = os.environ.get("TEST_HOURS", "0")
-    if "--test" in sys.argv:
-        test_hours = 2.0
-    elif "--test-hours" in sys.argv:
-        try:
-            idx = sys.argv.index("--test-hours")
-            test_hours = float(sys.argv[idx + 1])
-        except Exception:
-            test_hours = 2.0
-    else:
-        try:
-            test_hours = float(test_hours_str)
-        except ValueError:
-            test_hours = 0.0
+        daily_html = render_daily_total_summary_email(
+            yesterday_str, len(query), tier1_words, tier2_items, top_hits, y_stats
+        )
+        send_email(f"【確定日次レポート】{yesterday_str} 前日サマリー ＆ バランサー稼働状況", daily_html)
+        data_store["last_summary_date"] = today_str
+        print("🌅 前日トータルサマリーメールを送信しました")
 
-    is_test_mode = test_hours > 0.0
-    test_hours_display = "15分" if test_hours == 0.25 else ("30分" if test_hours == 0.5 else f"{int(test_hours) if test_hours.is_integer() else test_hours}時間")
+    data_store["processed_ids"] = list(processed_set)[-4000:]
+    data_store["last_run_utc"] = datetime.now(UTC).isoformat()
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data_store, f, ensure_ascii=False, indent=2)
 
-    if is_test_mode:
-        print("=" * 60)
-        print(f"【手動テスト実行モードで起動中 (直近 {test_hours_display})】")
-        print(f"・直近 {test_hours_display} 分のポストをID重複除外なしで取得・解析します。")
-        print("・本番DBのタイムトラッキングは保護され、次回の定期実行に影響を与えません。")
-        print("=" * 60)
-
-    check_env_vars()
-
-    config = load_config("config.json")
-    display_kws = config.get("display_keywords", [])
-    (processed_ids, 
-     last_search_start_time_str, 
-     last_search_end_time_str, 
-     last_daily_summary_date, 
-     daily_history) = load_processed_ids("processed_ids.json")
-    
-    if not is_test_mode and last_daily_summary_date != yesterday_str and yesterday_str in daily_history:
-        try:
-            print(f"前日 ({yesterday_str}) のトータルサマリーメールを送信中...")
-            send_daily_total_summary_email(daily_history[yesterday_str], yesterday_str, display_kws)
-            last_daily_summary_date = yesterday_str
-            print(f"前日トータルサマリーの送信が完了しました。")
-        except Exception as e:
-            print(f"前日トータルサマリーの送信中にエラーが発生しました: {e}")
-
-    now_utc = datetime.now(timezone.utc)
-    search_end_time = now_utc.replace(microsecond=0)
-    search_end_time_str = search_end_time.isoformat().replace("+00:00", "Z")
-
-    if is_test_mode:
-        search_start_time = now_utc - timedelta(hours=test_hours)
-    else:
-        if last_search_end_time_str:
-            try:
-                if last_search_end_time_str.endswith("Z"):
-                    last_end = datetime.fromisoformat(last_search_end_time_str.replace("Z", "+00:00"))
-                else:
-                    last_end = datetime.fromisoformat(last_search_end_time_str)
-                search_start_time = last_end
-            except Exception as e:
-                print(f"前回検索終了時刻のパース失敗 ({e})。デフォルト期間(130分前)を使用します。")
-                search_start_time = now_utc - timedelta(minutes=130)
-        else:
-            search_start_time = now_utc - timedelta(minutes=130)
-
-        max_back_time = now_utc - timedelta(hours=24)
-        if search_start_time < max_back_time:
-            print("警告: 前回実行から24時間以上経過しているため、直近24時間に検索範囲を制限します。")
-            search_start_time = max_back_time
-
-    search_start_time = search_start_time.replace(microsecond=0)
-    search_start_time_str = search_start_time.isoformat().replace("+00:00", "Z")
-
-    target_start_str = (search_start_time + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S")
-    target_end_str = (search_end_time + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S")
-    period_hours = max((search_end_time - search_start_time).total_seconds() / 3600.0, 0.01)
-
-    prev_start_jst_str = "不明"
-    prev_end_jst_str = "不明"
-    if last_search_start_time_str and last_search_end_time_str:
-        try:
-            p_start = datetime.fromisoformat(last_search_start_time_str.replace("Z", "+00:00"))
-            p_end = datetime.fromisoformat(last_search_end_time_str.replace("Z", "+00:00"))
-            prev_start_jst_str = (p_start + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S")
-            prev_end_jst_str = (p_end + timedelta(hours=9)).strftime("%Y-%m-%d %H:%M:%S")
-        except Exception as e:
-            print(f"前回期間のJST変換エラー: {e}")
-
-    ai_client = genai.Client(api_key=os.environ["GEMINI_API_KEY"])
-    
-    tweets, raw_total_count = fetch_tweets_from_twitterapi_io(config, processed_ids, search_start_time, search_end_time, is_test_mode=is_test_mode)
-    fetched_count = len(tweets)
-    print(f"処理対象 of 新規ポスト: {fetched_count} 件 (API生取得: {raw_total_count} 件)")
-    
-    sent_count = 0
-    skipped_count = 0
-    error_count = 0
-    total_input_tokens = 0
-    total_output_tokens = 0
-    skipped_tweets = []
-
-    clean_kws = [k.replace('"', '').replace('#', '').strip() for k in display_kws]
-    keyword_stats = {
-        kw: {"fetched": 0, "sent": 0, "skipped": 0, "error": 0}
-        for kw in clean_kws
-    }
-    keyword_stats["不明"] = {"fetched": 0, "sent": 0, "skipped": 0, "error": 0}
-
-    for tweet in tweets:
-        kw = tweet.get("matched_keyword", "不明")
-        if kw in keyword_stats:
-            keyword_stats[kw]["fetched"] += 1
-
-    for i, tweet in enumerate(tweets, 1):
-        kw = tweet.get("matched_keyword", "不明")
-        try:
-            print(f"[{i}/{fetched_count}] Tweet ID: {tweet['id']} ({kw}) を解析中...")
-            analyzed_data = analyze_tweet_with_ai(ai_client, tweet, config)
-            
-            total_input_tokens += analyzed_data.get("input_tokens", 0)
-            total_output_tokens += analyzed_data.get("output_tokens", 0)
-
-            is_looking = analyzed_data.get("is_looking_for_photographer", True)
-            is_tokyo_near = analyzed_data.get("is_tokyo_near", False)
-            is_cosplay = analyzed_data.get("is_cosplay", False)
-            is_excluded_genre = analyzed_data.get("is_excluded_genre", False)
-            is_official_or_job = analyzed_data.get("is_official_or_job", False)
-            is_noise = analyzed_data.get("is_noise", False)
-
-            shooting_type = analyzed_data.get("shooting_type", "不明")
-            location_name = analyzed_data.get("raw_location", "場所不明")
-            ocr_text = analyzed_data.get("ocr_text", "なし")
-
-            is_valid_for_notification = (
-                is_looking and 
-                is_tokyo_near and 
-                is_cosplay and 
-                not is_excluded_genre and 
-                not is_official_or_job and 
-                not is_noise
-            )
-
-            if not is_valid_for_notification:
-                skipped_count += 1
-                group_key = ""
-                reason = ""
-                detailed_reason = ""
-
-                if is_cosplay and is_looking and not is_excluded_genre and not is_official_or_job and not is_noise and not is_tokyo_near:
-                    group_key = "【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)"
-                    reason = "エリア対象外/場所不明"
-                    detailed_reason = f"コスプレ撮影ですが対象エリア外または場所不明 (判定: {location_name})"
-                elif not is_cosplay and is_looking and not is_official_or_job and not is_noise:
-                    group_key = "【一般撮影】ポートレート・個人撮影 (カメラマン募集あり)"
-                    reason = "撮影種別対象外 (コスプレ以外)"
-                    detailed_reason = f"コスプレ以外の個人撮影 ({shooting_type}) / 判定場所: {location_name}"
-                elif is_official_or_job:
-                    group_key = "【企業・公式・求人】公式イベント / 企業雇用・スタッフ募集"
-                    reason = "企業・公式求人"
-                    detailed_reason = f"公式イベントカメラマンまたは企業・スタジオ求人募集 ({shooting_type})"
-                elif is_excluded_genre:
-                    group_key = "【除外ジャンル】指定除外作品 (東リベ/ワートリ/呪術/ブルロ/金カム/P5等)"
-                    reason = "除外ジャンル該当"
-                    detailed_reason = f"除外対象ジャンルに該当 ({shooting_type})"
-                else:
-                    group_key = "【完全ノイズ・対象外】ゲーム募集 / 音楽ライブ / 都外確定 / カメラマン非募集"
-                    if is_noise:
-                        reason = "非撮影ノイズ"
-                        detailed_reason = f"ゲーム募集・音楽ライブ撮影・非撮影ノイズ ({shooting_type})"
-                    elif not is_looking:
-                        reason = "カメラマン非募集"
-                        detailed_reason = "カメラマンを募集していません（被写体/レイヤーのみ募集等）"
-                    else:
-                        reason = "エリア対象外"
-                        detailed_reason = f"対象エリア外 (判定: {location_name})"
-
-                print(f" ➔ スキップ: {detailed_reason}")
-                skipped_tweets.append({
-                    "text": tweet["text"],
-                    "url": f"https://x.com/i/status/{tweet['id']}",
-                    "matched_keyword": kw,
-                    "author_followers": tweet.get("author_followers", 0),
-                    "reason": reason,
-                    "detailed_reason": detailed_reason,
-                    "shooting_type": shooting_type,
-                    "location": analyzed_data.get("location", "場所不明"),
-                    "ocr_text": ocr_text,
-                    "group_key": group_key
-                })
-
-                if not is_test_mode:
-                    processed_ids.add(tweet["id"])
-                    save_processed_ids(processed_ids, search_start_time_str, search_end_time_str, last_daily_summary_date, daily_history)
-                if kw in keyword_stats:
-                    keyword_stats[kw]["skipped"] += 1
-                continue
-
-            print(f" ➔ メール送信中...")
-            send_single_email(analyzed_data, is_test_mode=is_test_mode, test_hours=test_hours)
-            sent_count += 1
-            print(f" ➔ 送信成功！")
-            
-            if not is_test_mode:
-                processed_ids.add(tweet["id"])
-                save_processed_ids(processed_ids, search_start_time_str, search_end_time_str, last_daily_summary_date, daily_history)
-
-            if kw in keyword_stats:
-                keyword_stats[kw]["sent"] += 1
-
-        except Exception as e:
-            print(f" ➔ エラーが発生しました (Tweet ID: {tweet.get('id')}): {e}")
-            error_count += 1
-            if kw in keyword_stats:
-                keyword_stats[kw]["error"] += 1
-
-    end_time_epoch = time.time()
-    end_jst = datetime.now(timezone.utc) + timedelta(hours=9)
-    end_time_str = end_jst.strftime("%H:%M:%S")
-
-    duration_sec = end_time_epoch - start_time_epoch
-    minutes = int(duration_sec // 60)
-    seconds = int(duration_sec % 60)
-    duration_str = f"{minutes}分{seconds}秒" if minutes > 0 else f"{seconds}秒"
-
-    if not is_test_mode:
-        if today_str not in daily_history:
-            daily_history[today_str] = {
-                "fetched_count": 0, "raw_tweets_count": 0, "sent_count": 0, "skipped_count": 0, "error_count": 0,
-                "input_tokens": 0, "output_tokens": 0, "keyword_stats": {}
-            }
-
-        daily_history[today_str]["fetched_count"] += fetched_count
-        daily_history[today_str]["raw_tweets_count"] = daily_history[today_str].get("raw_tweets_count", 0) + raw_total_count
-        daily_history[today_str]["sent_count"] += sent_count
-        daily_history[today_str]["skipped_count"] += skipped_count
-        daily_history[today_str]["error_count"] += error_count
-        daily_history[today_str]["input_tokens"] += total_input_tokens
-        daily_history[today_str]["output_tokens"] += total_output_tokens
-
-        if "keyword_stats" not in daily_history[today_str]:
-            daily_history[today_str]["keyword_stats"] = {}
-        for kw, s in keyword_stats.items():
-            if kw not in daily_history[today_str]["keyword_stats"]:
-                daily_history[today_str]["keyword_stats"][kw] = {"fetched": 0, "sent": 0, "skipped": 0, "error": 0}
-            daily_history[today_str]["keyword_stats"][kw]["fetched"] += s["fetched"]
-            daily_history[today_str]["keyword_stats"][kw]["sent"] += s["sent"]
-            daily_history[today_str]["keyword_stats"][kw]["skipped"] += s["skipped"]
-            daily_history[today_str]["keyword_stats"][kw]["error"] += s["error"]
-
-    summary_data = {
-        "fetched_count": fetched_count,
-        "raw_tweets_count": raw_total_count,
-        "sent_count": sent_count,
-        "skipped_count": skipped_count,
-        "error_count": error_count,
-        "input_tokens": total_input_tokens,
-        "output_tokens": total_output_tokens,
-        "total_tokens": total_input_tokens + total_output_tokens,
-        "skipped_tweets": skipped_tweets,
-        "start_time": start_time_str,
-        "end_time": end_time_str,
-        "duration": duration_str,
-        "display_keywords": display_kws,
-        "target_period_start": target_start_str,
-        "target_period_end": target_end_str,
-        "period_hours": period_hours,
-        "prev_period_start": prev_start_jst_str,
-        "prev_period_end": prev_end_jst_str
-    }
-
-    if not is_test_mode:
-        save_processed_ids(processed_ids, search_start_time_str, search_end_time_str, last_daily_summary_date, daily_history)
-
-    try:
-        print("実行サマリーメールを送信中...")
-        send_summary_email(summary_data, is_test_mode=is_test_mode, test_hours=test_hours)
-        print("サマリーメールの送信が完了しました。")
-    except Exception as e:
-        print(f"サマリーメールの送信中にエラーが発生しました: {e}")
-
-    if sent_count > 0:
-        print(f"合計 {sent_count} 件の通知メールを個別に送信しました。")
-    else:
-        print("該当する新しいポストはありませんでした。")
+    print(f"🏁 パイプライン全工程正常終了 (JST: {datetime.now(JST).strftime('%H:%M:%S')})")
 
 if __name__ == "__main__":
     main()
