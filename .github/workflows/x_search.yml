@@ -2,9 +2,25 @@ name: X Search Pipeline
 
 on:
   workflow_dispatch:
-  schedule:
-    # JST 7:00 〜 翌0:00 まで毎時0分（計18回稼働）
-    - cron: '0 22-23,0-15 * * *'
+    inputs:
+      test_hours:
+        description: 'テスト実行: 遡る時間 (0=通常定期実行・差分取得 / 0.25=15分 / 0.5=30分 / 1=1時間)'
+        required: false
+        type: choice
+        default: '0'
+        options:
+          - '0'
+          - '0.25'
+          - '0.5'
+          - '1'
+          - '2'
+          - '4'
+          - '8'
+          - '16'
+
+concurrency:
+  group: x-search-pipeline
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -24,28 +40,28 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests
+          pip install google-genai requests
 
       - name: Run Pipeline
         env:
+          TWITTERAPI_KEY: ${{ secrets.TWITTERAPI_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
+          TO_EMAIL: ${{ secrets.TO_EMAIL }}
+          TEST_HOURS: ${{ github.event.inputs.test_hours || '0' }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_KEYWORDS_DB_ID: ${{ secrets.NOTION_KEYWORDS_DB_ID }}
           NOTION_EXCLUDES_DB_ID: ${{ secrets.NOTION_EXCLUDES_DB_ID }}
           NOTION_GENRES_DB_ID: ${{ secrets.NOTION_GENRES_DB_ID }}
           NOTION_CONFIG_DB_ID: ${{ secrets.NOTION_CONFIG_DB_ID }}
-          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
         run: |
           python -u main.py
 
       - name: Commit and push processed IDs and cache
+        if: ${{ github.event.inputs.test_hours == '0' || github.event.inputs.test_hours == '' }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add processed_ids.json notion_cache.json || true
-          git commit -m "chore: auto-update processed IDs and cache [skip ci]" || echo "No changes to commit"
-          git pull --rebase origin main || true
-          git push origin main || true
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update processed_ids.json and cache [skip ci]" && git pull --rebase origin main && git push origin main)
