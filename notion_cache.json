@@ -60,6 +60,14 @@
   ],
   "excludes": [
     {
+      "page_id": "3ec44c31-6154-805e-b4c4-dacd3e7a2151",
+      "word": "池ハロ",
+      "category": "イベント",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
       "page_id": "3eb44c31-6154-802e-8a8c-f78a7c2d5fe1",
       "word": "クラファン",
       "category": "その他",
@@ -489,7 +497,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-8152-adb3-e20cf5e00909",
@@ -505,7 +513,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-81b0-928a-c31978e63fa7",
@@ -513,7 +521,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 2.0
     },
     {
       "page_id": "3eb44c31-6154-81cb-9e4a-c7975513f31a",
@@ -561,7 +569,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-8183-85a7-f742159cbfdd",
@@ -697,7 +705,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-8193-9184-e0b6e990a479",
@@ -729,7 +737,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-8159-9231-fabee8528098",
@@ -801,7 +809,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-811c-a46a-ecb79fbabc10",
@@ -809,7 +817,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 3.0
     },
     {
       "page_id": "3eb44c31-6154-81c8-8a2c-cbafd82ce7b0",
@@ -825,7 +833,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 2.0
     },
     {
       "page_id": "3eb44c31-6154-8133-b1cb-f1e0c38d8ef1",
@@ -920,8 +928,8 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-01T15:38:01.908194+00:00",
+  "cached_at": "2026-10-01T22:00:40.989651+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
-  "config_status_detail": "表1: 13語 / 表2: 103語 / 表3: 25作品 / 表4: 4項目 を同期"
+  "config_status_detail": "表1: 13語 / 表2: 104語 / 表3: 25作品 / 表4: 4項目 を同期"
 }
