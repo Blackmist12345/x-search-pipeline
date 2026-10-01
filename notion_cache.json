@@ -913,14 +913,14 @@
   ],
   "ai_model": "gemini-3.5-flash-lite",
   "max_text_length": 200,
-  "min_followers_count": 500000,
+  "min_followers_count": 50,
   "target_areas": [
     "東京都",
     "神奈川県",
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-01T15:27:00.091367+00:00",
+  "cached_at": "2026-10-01T15:35:21.786258+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
   "config_status_detail": "表1: 13語 / 表2: 103語 / 表3: 25作品 / 表4: 4項目 を同期"
