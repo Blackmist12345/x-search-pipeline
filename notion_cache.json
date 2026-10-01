@@ -60,6 +60,22 @@
   ],
   "excludes": [
     {
+      "page_id": "3ec44c31-6154-8065-a25b-f3000468c829",
+      "word": "Apex",
+      "category": "配信・ゲーム",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3ec44c31-6154-80e1-820c-e8a636920c02",
+      "word": "すすコス",
+      "category": "イベント",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
       "page_id": "3ec44c31-6154-805e-b4c4-dacd3e7a2151",
       "word": "池ハロ",
       "category": "イベント",
@@ -337,7 +353,7 @@
       "category": "求人・バイト",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-8103-a4d6-e44056c52c8a",
@@ -641,7 +657,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 3.0
     },
     {
       "page_id": "3eb44c31-6154-81d2-96d7-d8de86a46497",
@@ -928,8 +944,8 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-01T22:00:40.989651+00:00",
+  "cached_at": "2026-10-01T23:00:51.692961+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
-  "config_status_detail": "表1: 13語 / 表2: 104語 / 表3: 25作品 / 表4: 4項目 を同期"
+  "config_status_detail": "表1: 13語 / 表2: 106語 / 表3: 25作品 / 表4: 4項目 を同期"
 }
