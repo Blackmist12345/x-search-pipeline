@@ -14,15 +14,9 @@ from google.genai import types
 MAX_QUERY_LENGTH = 440
 NOTION_CACHE_FILE = "notion_cache.json"
 
-DISTANT_REGION_WORDS = [
-    "大阪", "名古屋", "福岡", "札幌", "愛知", "関西", "仙台", "京都", "神戸", "広島", "静岡",
-    "博多", "天神", "梅田", "難波", "栄", "北海道", "東北", "中部", "九州", "沖縄",
-    "青森", "岩手", "宮城", "秋田", "山形", "福島", "新潟", "富山", "石川", "福井",
-    "山梨", "長野", "岐阜", "三重", "滋賀", "兵庫", "奈良", "和歌山", "鳥取", "島根",
-    "岡山", "山口", "徳島", "香川", "愛媛", "高知", "佐賀", "長崎", "熊本", "大分", "宮崎", "鹿児島"
-]
-KANTO_SAFE_WORDS = ["東京", "神奈川", "埼玉", "千葉", "関東", "都内", "首都圏", "横浜", "川崎"]
-
+# ==========================================
+# Notion 4表 連携 ＆ 3重フェイルセーフ
+# ==========================================
 def fetch_notion_db_records(db_id, api_key):
     if not db_id or not api_key: return []
     url = f"https://api.notion.com/v1/databases/{db_id}/query"
@@ -50,7 +44,18 @@ def get_notion_prop_str(prop):
 def load_integrated_config():
     api_key = os.environ.get("NOTION_API_KEY")
     kw_id, ex_id, gn_id, cfg_id = os.environ.get("NOTION_KEYWORDS_DB_ID"), os.environ.get("NOTION_EXCLUDES_DB_ID"), os.environ.get("NOTION_GENRES_DB_ID"), os.environ.get("NOTION_CONFIG_DB_ID")
-    if api_key and kw_id and ex_id and gn_id and cfg_id:
+    
+    api_error_msg = None
+    if not (api_key and kw_id and ex_id and gn_id and cfg_id):
+        missing = []
+        if not api_key: missing.append("NOTION_API_KEY")
+        if not kw_id: missing.append("NOTION_KEYWORDS_DB_ID")
+        if not ex_id: missing.append("NOTION_EXCLUDES_DB_ID")
+        if not gn_id: missing.append("NOTION_GENRES_DB_ID")
+        if not cfg_id: missing.append("NOTION_CONFIG_DB_ID")
+        api_error_msg = f"環境変数不足: {', '.join(missing)}"
+        print(f"⚠️ Notion環境変数が不足しています: {api_error_msg}")
+    else:
         try:
             print("🔄 Notion 4表から最新設定を同期中...")
             raw_kw = fetch_notion_db_records(kw_id, api_key)
@@ -93,19 +98,34 @@ def load_integrated_config():
                 "group_a": group_a, "group_b": group_b, "display_keywords": display_keywords,
                 "excludes": excludes, "genres": genres, "ai_model": configs.get("AIモデル", "gemini-3.5-flash-lite"),
                 "max_text_length": int(configs.get("本文文字数制限", 200)), "min_followers_count": int(configs.get("最小フォロワー数", 0)),
-                "target_areas": target_areas, "cached_at": datetime.now(timezone.utc).isoformat()
+                "target_areas": target_areas, "cached_at": datetime.now(timezone.utc).isoformat(),
+                "config_source": "notion_api",
+                "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
+                "config_status_detail": f"表1: {len(group_a)+len(group_b)}語 / 表2: {len(excludes)}語 / 表3: {len(genres)}作品 / 表4: {len(configs)}項目 を同期"
             }
             with open(NOTION_CACHE_FILE, "w", encoding="utf-8") as f:
                 json.dump(result, f, ensure_ascii=False, indent=2)
             print("✅ Notion 4表同期成功＆キャッシュ更新完了")
             return result
         except Exception as e:
+            api_error_msg = str(e)
             print(f"⚠️ Notion API同期失敗: {e}")
 
     if os.path.exists(NOTION_CACHE_FILE):
-        print(f"🔄 {NOTION_CACHE_FILE} から直前キャッシュをロードします。")
-        with open(NOTION_CACHE_FILE, "r", encoding="utf-8") as f: return json.load(f)
+        try:
+            print(f"🔄 {NOTION_CACHE_FILE} から直前キャッシュをロードします。")
+            with open(NOTION_CACHE_FILE, "r", encoding="utf-8") as f:
+                cached = json.load(f)
+                if isinstance(cached, dict) and "group_a" in cached:
+                    cached_at = cached.get("cached_at", "日時不明")
+                    cached["config_source"] = "cache"
+                    cached["config_status_badge"] = "🟡 Notion API失敗 ➔ 直前キャッシュ復旧"
+                    cached["config_status_detail"] = f"キャッシュ日時: {cached_at} (Notion失敗: {api_error_msg or '詳細不明'})"
+                    return cached
+        except Exception as ce:
+            print(f"⚠️ キャッシュ読み込み失敗: {ce}")
 
+    print("⚠️ config.json から縮退運転を開始します。")
     with open("config.json", "r", encoding="utf-8") as f:
         old_cfg = json.load(f)
         return {
@@ -115,7 +135,10 @@ def load_integrated_config():
             "excludes": [{"page_id": None, "word": w, "category": "旧単語", "is_pin": True, "status": "確定枠(1段目)", "score": 0.0} for w in old_cfg.get("blacklist_words", [])],
             "genres": ["忍たま乱太郎", "刀剣乱舞", "あんさんぶるスターズ", "桃源暗鬼", "イナズマイレブン", "ツイステッドワンダーランド", "ドクターストーン", "アイドリッシュセブン", "ヒプノシスマイク", "東京リベンジャーズ", "ワールドトリガー", "呪術廻戦", "ブルーロック", "A3!", "ゴールデンカムイ", "ペルソナ5", "ペルソナ4", "ペルソナ3", "鬼灯の冷徹", "銀魂", "HUNTER×HUNTER", "ワンピース", "ポケモン", "ディズニー", "鬼滅の刃"],
             "ai_model": "gemini-3.5-flash-lite", "max_text_length": old_cfg.get("max_text_length", 200),
-            "min_followers_count": old_cfg.get("min_followers_count", 0), "target_areas": old_cfg.get("target_areas", ["東京都", "神奈川県", "埼玉県", "千葉県"])
+            "min_followers_count": old_cfg.get("min_followers_count", 0), "target_areas": old_cfg.get("target_areas", ["東京都", "神奈川県", "埼玉県", "千葉県"]),
+            "config_source": "local_fallback",
+            "config_status_badge": "🔴 Notion/キャッシュ不可 ➔ config.json 縮退運転",
+            "config_status_detail": f"ローカル初期設定で稼働中 (Notion失敗: {api_error_msg or 'Notion API未実行'})"
         }
 
 def build_auto_balancer_query(group_a, group_b, excludes):
@@ -162,6 +185,9 @@ def update_notion_exclude_scores(tier2_items, tier2_hit_counts):
             try: requests.patch(url, headers=headers, json={"properties": {"観測スコア(件/日)": {"number": new_score}}}, timeout=10)
             except Exception as e: print(f"⚠️ Notionスコア書き戻しエラー ({word}): {e}")
 
+# ==========================================
+# 永続化ストレージ (processed_ids.json)
+# ==========================================
 def load_processed_ids(filepath="processed_ids.json"):
     if os.path.exists(filepath):
         try:
@@ -233,6 +259,9 @@ def detect_matched_keyword(full_text, display_keywords):
         elif kw_clean.lower() in text_lower: return kw_clean
     return "カメラマン AND 募集"
 
+# ==========================================
+# Twitter API 検索 ＆ 多層フィルタリング
+# ==========================================
 def fetch_tweets_from_twitterapi_io(query_str, display_keywords, tier2_items, max_text_len, min_followers, processed_ids, search_start_time, search_end_time, is_test_mode=False):
     api_key = os.environ.get("TWITTERAPI_KEY")
     url = "https://api.twitterapi.io/twitter/tweet/advanced_search"
@@ -304,13 +333,6 @@ def fetch_tweets_from_twitterapi_io(query_str, display_keywords, tier2_items, ma
         author_name = author.get("name", "")
         author_desc = author.get("description", "")
         author_loc = author.get("location", "")
-        author_profile_combined = f"{author_name} {author_loc} {author_desc}"
-
-        has_distant = any(w in author_profile_combined for w in DISTANT_REGION_WORDS)
-        has_kanto = any(k in author_profile_combined for k in KANTO_SAFE_WORDS)
-        if has_distant and not has_kanto:
-            print(f" ➔ 投稿者プロフィール地方名検知により0次除外 (ID: {tweet_id})")
-            continue
 
         quoted = next((tweet.get(k) for k in ["quoted_tweet", "quotedTweet", "quoted_status", "quotedStatus"] if tweet.get(k) and isinstance(tweet.get(k), dict)), None)
         quoted_text = (quoted.get("text", "") or quoted.get("full_text", "")) if quoted else ""
@@ -323,9 +345,9 @@ def fetch_tweets_from_twitterapi_io(query_str, display_keywords, tier2_items, ma
         reply_images = extract_media_urls(reply_parent) if reply_parent else []
 
         full_text_combined = f"{text_raw}\n{quoted_text}\n{reply_text}"
-        all_text_with_profile = f"{full_text_combined}\n{author_profile_combined}"
 
-        matched_t2_word = next((w for w in tier2_words if w in all_text_with_profile), None)
+        # 2段目除外単語チェック（ポスト本文・引用・リプライのみ対象とし、プロフィール誤爆を防止）
+        matched_t2_word = next((w for w in tier2_words if w in full_text_combined), None)
         if matched_t2_word:
             tier2_hit_counts[matched_t2_word] = tier2_hit_counts.get(matched_t2_word, 0) + 1
             print(f" ➔ 2段目除外単語ヒット ('{matched_t2_word}') によりスキップ (ID: {tweet_id})")
@@ -344,6 +366,9 @@ def fetch_tweets_from_twitterapi_io(query_str, display_keywords, tier2_items, ma
 
     return filtered_tweets, raw_total_count, tier2_hit_counts
 
+# ==========================================
+# Gemini 構造化AI判定 ＆ 画像OCR
+# ==========================================
 def analyze_tweet_with_ai(ai_client, tweet, target_areas, genres, ai_model="gemini-3.5-flash-lite"):
     target_areas_str, genres_str = "、".join(target_areas), "、".join(genres)
     image_urls = tweet.get("image_urls", [])
@@ -432,6 +457,9 @@ def analyze_tweet_with_ai(ai_client, tweet, target_areas, genres, ai_model="gemi
         "reply_text": tweet.get("reply_text", ""), "reply_id": tweet.get("reply_id", "")
     }
 
+# ==========================================
+# メール送信 ＆ 美麗HTML
+# ==========================================
 def send_single_email(item, is_test_mode=False, test_hours=0.0):
     msg = MIMEMultipart()
     msg['From'] = os.environ["GMAIL_USER"]
@@ -501,6 +529,10 @@ def send_daily_total_summary_email(daily_stats, target_date_str, display_keyword
     twitter_jpy = twitter_usd * 155.0
     total_jpy = gemini_jpy + twitter_jpy
 
+    monthly_twitter_jpy = twitter_jpy * 30
+    monthly_gemini_jpy = gemini_jpy * 30
+    monthly_total_jpy = total_jpy * 30
+
     kw_stats = daily_stats.get("keyword_stats", {})
     sorted_kw = sorted([(k, v) for k, v in kw_stats.items() if v.get("fetched", 0) > 0], key=lambda x: (x[1].get("fetched", 0), x[1].get("sent", 0)), reverse=True)
     top10_html = "".join([f"<li style='margin-bottom:6px; font-size:13px;'><strong>{i+1}位 【{kw}】</strong>: 取得: <strong>{s['fetched']:,}</strong> / 送信: <span style='color:#28a745; font-weight:bold;'>{s['sent']:,}</span> / スキップ: {s['skipped']:,}</li>" for i, (kw, s) in enumerate(sorted_kw[:10])]) or "<li style='color:#586069; font-size:13px;'>・前日のヒットはありませんでした。</li>"
@@ -544,9 +576,10 @@ def send_daily_total_summary_email(daily_stats, target_date_str, display_keyword
       </table>
       <div class="section-title">■ API消費量 ＆ 概算費用</div>
       <ul class="meta-list">
-        <li>・<strong>TwitterAPI.io:</strong> {twitter_credits:,} credits ({raw_count:,}件) ➔ 約 <strong>{twitter_jpy:.2f} 円</strong></li>
+        <li>・<strong>TwitterAPI.io:</strong> {raw_count * 15:,} credits ({raw_count:,}件) ➔ 約 <strong>{twitter_jpy:.2f} 円</strong></li>
         <li>・<strong>Gemini AI:</strong> {total_tokens:,} tokens ➔ 約 <strong>{gemini_jpy:.2f} 円</strong></li>
         <li style="margin-top:6px; border-top:1px dashed #e1e4e8; padding-top:6px;">★ <strong>前日24時間合計: 約 <span style="color:#0366d6; font-size:15px; font-weight:bold;">{total_jpy:.2f} 円</span></strong></li>
+        <li style="margin-top:4px;">★ <strong>月間換算試算: 約 <span style="color:#d73a49; font-size:15px; font-weight:bold;">{monthly_total_jpy:.2f} 円 / 月</span></strong></li>
       </ul>
       <div class="section-title">■ 前日ヒット数 TOP 10</div>
       <ul style="padding-left:20px; font-size:13px; line-height:1.6;">{top10_html}</ul>
@@ -583,6 +616,17 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
     display_kws = summary_data.get("display_keywords", [])
     kw_order = {kw: i for i, kw in enumerate(display_kws)}
     skipped_tweets = summary_data.get("skipped_tweets", [])
+
+    cfg_badge = summary_data.get("config_status_badge", "不明")
+    cfg_detail = summary_data.get("config_status_detail", "")
+    cfg_source = summary_data.get("config_source", "")
+
+    if "🟢" in cfg_badge or cfg_source == "notion_api":
+        badge_style = "background:#e6ffed; color:#22863a; border:1px solid #34d058; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;"
+    elif "🟡" in cfg_badge or cfg_source == "cache":
+        badge_style = "background:#fff5b1; color:#735c0f; border:1px solid #d99b00; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;"
+    else:
+        badge_style = "background:#ffeef0; color:#cb2431; border:1px solid #d73a49; padding:2px 8px; border-radius:4px; font-size:12px; font-weight:bold;"
 
     grouped_skipped = {
         "【要確認・併せ募集】コスプレ併せ・撮影 (カメラマン募集あり・場所不明/都外判定)": [],
@@ -668,6 +712,10 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
         <li><strong>■ 実行日時 (JST):</strong> {now_jst.strftime("%Y-%m-%d %H:%M:%S")}</li>
         <li><strong>・検索対象期間 (JST):</strong> {summary_data.get('target_period_start','不明')} 〜 {summary_data.get('target_period_end','不明')} ({period_hours:.2f}時間分)</li>
         <li><strong>・処理所要時間:</strong> {summary_data.get('duration','不明')}</li>
+        <li style="margin-top:6px; padding-top:6px; border-top:1px dashed #e1e4e8;">
+          <strong>・Notion設定参照:</strong> <span style="{badge_style}">{cfg_badge}</span>
+          <div style="font-size:12px; color:#586069; margin-top:4px; margin-left:14px;">└ {cfg_detail}</div>
+        </li>
       </ul>
       <div class="section-title">■ 全体ポスト処理件数</div>
       <div class="stat-box-container">
@@ -692,22 +740,38 @@ def send_summary_email(summary_data, is_test_mode=False, test_hours=0.0):
     msg.attach(MIMEText(html, 'html', 'utf-8'))
     send_email_with_retry(msg)
 
+# ==========================================
+# メイン実行関数
+# ==========================================
 def main():
     start_time_epoch = time.time()
     now_jst = datetime.now(timezone.utc) + timedelta(hours=9)
     today_str = now_jst.strftime("%Y-%m-%d")
     yesterday_str = (now_jst - timedelta(days=1)).strftime("%Y-%m-%d")
 
+    run_mode = os.environ.get("RUN_MODE", "").strip().lower()
     test_hours_str = os.environ.get("TEST_HOURS", "0")
-    if "--test" in sys.argv: test_hours = 2.0
+
+    if "--test" in sys.argv:
+        is_test_mode = True
+        test_hours = 2.0
     elif "--test-hours" in sys.argv:
+        is_test_mode = True
         try: test_hours = float(sys.argv[sys.argv.index("--test-hours") + 1])
         except Exception: test_hours = 2.0
+    elif run_mode == "test":
+        is_test_mode = True
+        try: test_hours = float(test_hours_str)
+        except ValueError: test_hours = 1.0
+    elif run_mode == "production":
+        is_test_mode = False
+        test_hours = 0.0
     else:
         try: test_hours = float(test_hours_str)
         except ValueError: test_hours = 0.0
+        is_test_mode = test_hours > 0.0
 
-    is_test_mode = test_hours > 0.0
+    print(f"🚀 稼働モード: {'【テスト実行】(遡り: ' + str(test_hours) + '時間 / ID保存なし)' if is_test_mode else '【本番実行】(差分取得 / ID永続保存あり)'}")
     check_env_vars()
 
     cfg_data = load_integrated_config()
@@ -715,6 +779,9 @@ def main():
     display_kws = cfg_data["display_keywords"]
     excludes, genres, ai_model = cfg_data["excludes"], cfg_data["genres"], cfg_data["ai_model"]
     max_text_len, min_followers, target_areas = cfg_data["max_text_length"], cfg_data["min_followers_count"], cfg_data["target_areas"]
+    config_status_badge = cfg_data.get("config_status_badge", "不明")
+    config_status_detail = cfg_data.get("config_status_detail", "")
+    config_source = cfg_data.get("config_source", "")
 
     processed_ids, last_start_str, last_end_str, last_daily_summary_date, daily_history, balancer_hits = load_processed_ids("processed_ids.json")
     query_str, tier1_words, tier2_items = build_auto_balancer_query(group_a, group_b, excludes)
@@ -863,7 +930,8 @@ def main():
         "skipped_count": skipped_count, "error_count": error_count, "input_tokens": total_input_tokens,
         "output_tokens": total_output_tokens, "skipped_tweets": skipped_tweets,
         "duration": duration_str, "display_keywords": display_kws,
-        "target_period_start": target_start_str, "target_period_end": target_end_str, "period_hours": period_hours
+        "target_period_start": target_start_str, "target_period_end": target_end_str, "period_hours": period_hours,
+        "config_status_badge": config_status_badge, "config_status_detail": config_status_detail, "config_source": config_source
     }
 
     if not is_test_mode:

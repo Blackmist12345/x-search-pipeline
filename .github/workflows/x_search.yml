@@ -3,13 +3,20 @@ name: X Search Pipeline
 on:
   workflow_dispatch:
     inputs:
+      run_mode:
+        description: '実行モード (production=本番差分取得・ID永続保存 / test=テスト遡り取得・ID保存なし)'
+        required: true
+        type: choice
+        default: 'production'
+        options:
+          - 'production'
+          - 'test'
       test_hours:
-        description: 'テスト実行: 遡る時間 (0=通常定期実行・差分取得 / 0.25=15分 / 0.5=30分 / 1=1時間)'
+        description: '【テスト実行時のみ】遡る時間 (0.25=15分 / 0.5=30分 / 1=1時間 / 2=2時間...)'
         required: false
         type: choice
-        default: '0'
+        default: '1'
         options:
-          - '0'
           - '0.25'
           - '0.5'
           - '1'
@@ -49,7 +56,8 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
           TO_EMAIL: ${{ secrets.TO_EMAIL }}
-          TEST_HOURS: ${{ github.event.inputs.test_hours || '0' }}
+          RUN_MODE: ${{ github.event.inputs.run_mode || 'production' }}
+          TEST_HOURS: ${{ github.event.inputs.test_hours || '1' }}
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           NOTION_KEYWORDS_DB_ID: ${{ secrets.NOTION_KEYWORDS_DB_ID }}
           NOTION_EXCLUDES_DB_ID: ${{ secrets.NOTION_EXCLUDES_DB_ID }}
@@ -59,9 +67,16 @@ jobs:
           python -u main.py
 
       - name: Commit and push processed IDs and cache
-        if: ${{ github.event.inputs.test_hours == '0' || github.event.inputs.test_hours == '' }}
+        if: ${{ (github.event.inputs.run_mode == 'production' || github.event.inputs.run_mode == '' || github.event_name == 'schedule') }}
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add processed_ids.json notion_cache.json || true
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update processed_ids.json and cache [skip ci]" && git pull --rebase origin main && git push origin main)
+          git add processed_ids.json
+          [ -f notion_cache.json ] && git add notion_cache.json
+          if git diff --staged --quiet; then
+            echo "コミット対象の差分はありませんでした。"
+          else
+            git commit -m "Update processed_ids.json and cache [skip ci]"
+            git pull --rebase origin main
+            git push origin main
+          fi
