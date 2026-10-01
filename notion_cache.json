@@ -1,0 +1,927 @@
+{
+  "group_a": [
+    "撮ってくれる",
+    "撮ってくださる",
+    "撮影してくれる",
+    "撮影してくださる",
+    "カメラマン"
+  ],
+  "group_b": [
+    "いませんか",
+    "いらっしゃいませんか",
+    "ゆる募",
+    "ゆるぼ",
+    "急募",
+    "さがしています",
+    "探しています",
+    "募集"
+  ],
+  "display_keywords": [
+    "撮ってくれる AND いませんか",
+    "撮ってくれる AND いらっしゃいませんか",
+    "撮ってくれる AND ゆる募",
+    "撮ってくれる AND ゆるぼ",
+    "撮ってくれる AND 急募",
+    "撮ってくれる AND さがしています",
+    "撮ってくれる AND 探しています",
+    "撮ってくれる AND 募集",
+    "撮ってくださる AND いませんか",
+    "撮ってくださる AND いらっしゃいませんか",
+    "撮ってくださる AND ゆる募",
+    "撮ってくださる AND ゆるぼ",
+    "撮ってくださる AND 急募",
+    "撮ってくださる AND さがしています",
+    "撮ってくださる AND 探しています",
+    "撮ってくださる AND 募集",
+    "撮影してくれる AND いませんか",
+    "撮影してくれる AND いらっしゃいませんか",
+    "撮影してくれる AND ゆる募",
+    "撮影してくれる AND ゆるぼ",
+    "撮影してくれる AND 急募",
+    "撮影してくれる AND さがしています",
+    "撮影してくれる AND 探しています",
+    "撮影してくれる AND 募集",
+    "撮影してくださる AND いませんか",
+    "撮影してくださる AND いらっしゃいませんか",
+    "撮影してくださる AND ゆる募",
+    "撮影してくださる AND ゆるぼ",
+    "撮影してくださる AND 急募",
+    "撮影してくださる AND さがしています",
+    "撮影してくださる AND 探しています",
+    "撮影してくださる AND 募集",
+    "カメラマン AND いませんか",
+    "カメラマン AND いらっしゃいませんか",
+    "カメラマン AND ゆる募",
+    "カメラマン AND ゆるぼ",
+    "カメラマン AND 急募",
+    "カメラマン AND さがしています",
+    "カメラマン AND 探しています",
+    "カメラマン AND 募集"
+  ],
+  "excludes": [
+    {
+      "page_id": "3eb44c31-6154-802e-8a8c-f78a7c2d5fe1",
+      "word": "クラファン",
+      "category": "その他",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-805a-a50d-d13a8ce81c1f",
+      "word": "ハメ撮り",
+      "category": "その他",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-80df-8fab-f59b88df7c87",
+      "word": "とまコス",
+      "category": "イベント",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81f6-b8ee-cc8b5be35928",
+      "word": "児童養護施設",
+      "category": "その他",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81db-8719-f7460795d88c",
+      "word": "運動会",
+      "category": "イベント",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8124-93d2-d496c30338cb",
+      "word": "コスサミ",
+      "category": "イベント",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8100-88bb-c4d6d1e76f23",
+      "word": "ラグコス",
+      "category": "イベント",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8131-884e-d8f1845b7811",
+      "word": "アコスタ",
+      "category": "イベント",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81dd-8e3e-e550c1f6e9f2",
+      "word": "チケット取り置き",
+      "category": "アイドル・夜職",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-814c-97e4-ee90b95735f4",
+      "word": "対バン",
+      "category": "アイドル・夜職",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81f6-b621-fdc49be3c7f1",
+      "word": "チェキスタ",
+      "category": "アイドル・夜職",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81f8-adf5-d0f2b6cec0cf",
+      "word": "チェキ",
+      "category": "アイドル・夜職",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8103-869d-ef44457a1ded",
+      "word": "愚痴",
+      "category": "ネガティブ",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8139-b2e0-e2b31b7d1df1",
+      "word": "晒し",
+      "category": "ネガティブ",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-817b-8d6e-d273a208e33b",
+      "word": "ゴミ",
+      "category": "ネガティブ",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-812d-b978-edcb5b4d0a6e",
+      "word": "死ね",
+      "category": "ネガティブ",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81cc-84c3-fe183dea3276",
+      "word": "下手",
+      "category": "ネガティブ",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8146-b09c-f781b73997d2",
+      "word": "クソ",
+      "category": "ネガティブ",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8137-948a-dcd7fa6a4d56",
+      "word": "インスタンス",
+      "category": "配信・ゲーム",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81bd-92b2-c3db0d023ec3",
+      "word": "VRC",
+      "category": "配信・ゲーム",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81d3-894c-f6bf38f891b7",
+      "word": "ぶいちゃ",
+      "category": "配信・ゲーム",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8152-bcfd-d1bd5021c3fc",
+      "word": "VRChat",
+      "category": "配信・ゲーム",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-811d-a18a-e483dab0efdb",
+      "word": "クラン",
+      "category": "配信・ゲーム",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8174-8974-dc69af507d2d",
+      "word": "VTuber",
+      "category": "配信・ゲーム",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8198-a7ae-c67795365125",
+      "word": "ウィッグ譲渡",
+      "category": "物販・譲渡",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-819d-bd92-e27523f2c0cf",
+      "word": "買取",
+      "category": "物販・譲渡",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81c2-aaa0-e4417b5ef221",
+      "word": "お譲り",
+      "category": "物販・譲渡",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-814e-9a57-f2623c69010e",
+      "word": "衣装譲渡",
+      "category": "物販・譲渡",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8148-a0f7-ef8d1416daf2",
+      "word": "売り子募集",
+      "category": "物販・譲渡",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8155-9149-d7da2f0e7e99",
+      "word": "商品撮影",
+      "category": "物販・譲渡",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-811f-89b5-ed39cd262793",
+      "word": "物撮り",
+      "category": "物販・譲渡",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81e7-8c4c-c5f7be53b88d",
+      "word": "副業",
+      "category": "求人・バイト",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8167-a199-cf3bc40dac09",
+      "word": "正社員",
+      "category": "求人・バイト",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81d0-827a-c8466d58ca70",
+      "word": "シフト",
+      "category": "求人・バイト",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8103-a4d6-e44056c52c8a",
+      "word": "業務委託",
+      "category": "求人・バイト",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8156-a0e9-dbb343f8068a",
+      "word": "月給",
+      "category": "求人・バイト",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81e5-9010-cdcbcf2921da",
+      "word": "日給",
+      "category": "求人・バイト",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81d7-8e27-e857b3a702f1",
+      "word": "時給",
+      "category": "求人・バイト",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-812d-855e-fe2400756590",
+      "word": "撮影会枠",
+      "category": "サロン・他撮影",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-818e-8c1c-f6601d965b1b",
+      "word": "MV撮影",
+      "category": "サロン・他撮影",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8196-bcb0-d77cd99f5a67",
+      "word": "フォトウェディング",
+      "category": "サロン・他撮影",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81e1-acd8-e1b5aae060db",
+      "word": "前撮り",
+      "category": "サロン・他撮影",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8109-b577-dc5309e94b61",
+      "word": "マツエク",
+      "category": "サロン・他撮影",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-811f-b168-ea5b08ea9b0d",
+      "word": "カットモデル",
+      "category": "サロン・他撮影",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8142-9a78-d54a4f2954b1",
+      "word": "ヘアカタ",
+      "category": "サロン・他撮影",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8106-a1ea-da852783af90",
+      "word": "サロモ",
+      "category": "サロン・他撮影",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8182-9da8-c797409cb23d",
+      "word": "サロンモデル",
+      "category": "サロン・他撮影",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81d6-8f25-f14f55fc1aea",
+      "word": "鹿児島",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81fa-b4c8-dffce931cbda",
+      "word": "宮崎",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8133-a7a3-f105f4cff026",
+      "word": "大分",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-810a-92bc-f427cf284c3a",
+      "word": "熊本",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81ab-b283-fc49e675bbe3",
+      "word": "長崎",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81a1-ac71-db8bdb15478c",
+      "word": "佐賀",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8126-be16-d64cda39aac6",
+      "word": "高知",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8152-adb3-e20cf5e00909",
+      "word": "愛媛",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8175-abcf-d63341c2539f",
+      "word": "香川",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81b0-928a-c31978e63fa7",
+      "word": "徳島",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81cb-9e4a-c7975513f31a",
+      "word": "山口",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8157-a74f-d89ce1b88520",
+      "word": "岡山",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8101-930a-d71e7e63cf6f",
+      "word": "島根",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-817b-bc13-d8643916ed48",
+      "word": "鳥取",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81ca-8d47-c37d136d6a09",
+      "word": "和歌山",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8156-870a-dec13d57440f",
+      "word": "奈良",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8183-85a7-f742159cbfdd",
+      "word": "兵庫",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-814a-892e-fff3f878c236",
+      "word": "滋賀",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81dc-b2ac-ca82250ee1ca",
+      "word": "三重",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8110-841a-eb3a86ee615c",
+      "word": "岐阜",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81e3-b1e8-f7c6e289f3f5",
+      "word": "長野",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8162-abc8-ce467031eede",
+      "word": "山梨",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-814f-85a8-ee8199f511e0",
+      "word": "福井",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-818e-845c-e0c302a3de14",
+      "word": "石川",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81ae-8f78-fc0683f4bdbf",
+      "word": "富山",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81d2-96d7-d8de86a46497",
+      "word": "新潟",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8146-baf4-ce2e1686fffe",
+      "word": "群馬",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81a5-b752-fc106e646489",
+      "word": "栃木",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8132-a915-c16fca644d81",
+      "word": "茨城",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81a7-b944-d183debb3037",
+      "word": "福島",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81cb-8ed3-d03d81cd38c6",
+      "word": "山形",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8162-8793-d124e8c43c32",
+      "word": "秋田",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8193-884e-cd7380a8d4f1",
+      "word": "宮城",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8193-9184-e0b6e990a479",
+      "word": "岩手",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8128-ae0a-da0859d03cd2",
+      "word": "青森",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8106-8797-ce12367caf94",
+      "word": "沖縄",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-816a-a431-eef3161bbc5a",
+      "word": "九州",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8159-9231-fabee8528098",
+      "word": "中部",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8110-8dc5-ce654347ce5f",
+      "word": "東北",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81bb-ac3b-d4504091e9ea",
+      "word": "北海道",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8183-b312-f75fa738dad5",
+      "word": "栄",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81eb-a8d1-ef2b42445229",
+      "word": "難波",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8167-807b-e04d1574547e",
+      "word": "梅田",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81b9-b0c1-f9d8a9f1e6b9",
+      "word": "天神",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81f3-ad3b-ceabec36f6fe",
+      "word": "博多",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-810a-b60c-ef15b22719cd",
+      "word": "静岡",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-811c-a46a-ecb79fbabc10",
+      "word": "広島",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81c8-8a2c-cbafd82ce7b0",
+      "word": "神戸",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8174-a244-f0a01095cc76",
+      "word": "京都",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8133-b1cb-f1e0c38d8ef1",
+      "word": "仙台",
+      "category": "地方・都市名",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
+      "page_id": "3eb44c31-6154-813c-9ad4-c10dc9977ee2",
+      "word": "関西",
+      "category": "地方・都市名",
+      "is_pin": true,
+      "status": "確定枠(1段目)",
+      "score": 12.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81e0-90a0-d3cec376cb00",
+      "word": "愛知",
+      "category": "地方・都市名",
+      "is_pin": true,
+      "status": "確定枠(1段目)",
+      "score": 10.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8113-b3d8-e0d162c6ba7b",
+      "word": "札幌",
+      "category": "地方・都市名",
+      "is_pin": true,
+      "status": "確定枠(1段目)",
+      "score": 5.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8116-883d-dadab0cb08d4",
+      "word": "福岡",
+      "category": "地方・都市名",
+      "is_pin": true,
+      "status": "確定枠(1段目)",
+      "score": 8.0
+    },
+    {
+      "page_id": "3eb44c31-6154-81ad-9511-dc836f343090",
+      "word": "名古屋",
+      "category": "地方・都市名",
+      "is_pin": true,
+      "status": "確定枠(1段目)",
+      "score": 10.0
+    },
+    {
+      "page_id": "3eb44c31-6154-8106-81c5-fd20e619a952",
+      "word": "大阪",
+      "category": "地方・都市名",
+      "is_pin": true,
+      "status": "確定枠(1段目)",
+      "score": 15.0
+    }
+  ],
+  "genres": [
+    "鬼滅の刃",
+    "ディズニー",
+    "ポケモン",
+    "ワンピース",
+    "HUNTER×HUNTER",
+    "銀魂",
+    "鬼灯の冷徹",
+    "ペルソナ3",
+    "ペルソナ4",
+    "ペルソナ5",
+    "ゴールデンカムイ",
+    "A3!",
+    "ワールドトリガー",
+    "ヒプノシスマイク",
+    "アイドリッシュセブン",
+    "ドクターストーン",
+    "ツイステッドワンダーランド",
+    "イナズマイレブン",
+    "桃源暗鬼",
+    "あんさんぶるスターズ",
+    "刀剣乱舞",
+    "東京リベンジャーズ",
+    "忍たま乱太郎",
+    "ブルーロック",
+    "呪術廻戦"
+  ],
+  "ai_model": "gemini-3.5-flash-lite",
+  "max_text_length": 200,
+  "min_followers_count": 500000,
+  "target_areas": [
+    "東京都",
+    "神奈川県",
+    "埼玉県",
+    "千葉県"
+  ],
+  "cached_at": "2026-10-01T15:27:00.091367+00:00",
+  "config_source": "notion_api",
+  "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
+  "config_status_detail": "表1: 13語 / 表2: 103語 / 表3: 25作品 / 表4: 4項目 を同期"
+}
