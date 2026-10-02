@@ -60,6 +60,14 @@
   ],
   "excludes": [
     {
+      "page_id": "3ed44c31-6154-80ab-9110-ff8fdc565949",
+      "word": "囲み",
+      "category": "その他",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
       "page_id": "3ec44c31-6154-8065-a25b-f3000468c829",
       "word": "Apex",
       "category": "配信・ゲーム",
@@ -689,7 +697,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-81a7-b944-d183debb3037",
@@ -944,8 +952,8 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-02T00:00:49.407281+00:00",
+  "cached_at": "2026-10-02T01:00:59.897483+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
-  "config_status_detail": "表1: 13語 / 表2: 106語 / 表3: 25作品 / 表4: 4項目 を同期"
+  "config_status_detail": "表1: 13語 / 表2: 107語 / 表3: 25作品 / 表4: 4項目 を同期"
 }
