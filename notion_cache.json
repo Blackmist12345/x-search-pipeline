@@ -193,7 +193,7 @@
       "category": "アイドル・夜職",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-8103-869d-ef44457a1ded",
@@ -960,7 +960,7 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-03T10:30:41.352479+00:00",
+  "cached_at": "2026-10-03T11:00:37.849763+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
   "config_status_detail": "表1: 13語 / 表2: 108語 / 表3: 25作品 / 表4: 4項目 を同期"
