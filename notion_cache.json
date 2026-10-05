@@ -241,7 +241,7 @@
       "category": "ネガティブ",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-812d-b978-edcb5b4d0a6e",
@@ -617,7 +617,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-8156-870a-dec13d57440f",
@@ -984,7 +984,7 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-05T22:01:55.455011+00:00",
+  "cached_at": "2026-10-05T23:01:42.257997+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
   "config_status_detail": "表1: 13語 / 表2: 111語 / 表3: 25作品 / 表4: 4項目 を同期"
