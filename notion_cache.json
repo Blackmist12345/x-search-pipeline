@@ -169,7 +169,7 @@
       "category": "イベント",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-8131-884e-d8f1845b7811",
@@ -697,7 +697,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-8146-baf4-ce2e1686fffe",
@@ -976,7 +976,7 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-05T09:00:36.375305+00:00",
+  "cached_at": "2026-10-05T10:01:46.922021+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
   "config_status_detail": "表1: 13語 / 表2: 110語 / 表3: 25作品 / 表4: 4項目 を同期"
