@@ -60,6 +60,14 @@
   ],
   "excludes": [
     {
+      "page_id": "3ef44c31-6154-806b-86cf-f6a4388dd07e",
+      "word": "リク撮",
+      "category": "アイドル・夜職",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
       "page_id": "3ef44c31-6154-803b-90d2-f478d6e369fb",
       "word": "リクエスト動画",
       "category": "配信・ゲーム",
@@ -968,8 +976,8 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-04T23:00:42.636442+00:00",
+  "cached_at": "2026-10-05T00:00:51.879267+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
-  "config_status_detail": "表1: 13語 / 表2: 109語 / 表3: 25作品 / 表4: 4項目 を同期"
+  "config_status_detail": "表1: 13語 / 表2: 110語 / 表3: 25作品 / 表4: 4項目 を同期"
 }
