@@ -737,7 +737,7 @@
       "category": "地方・都市名",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 1.0
+      "score": 1.95
     },
     {
       "page_id": "3eb44c31-6154-81a7-b944-d183debb3037",
@@ -992,7 +992,7 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-07T03:01:50.893776+00:00",
+  "cached_at": "2026-10-07T04:01:31.377509+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
   "config_status_detail": "表1: 13語 / 表2: 112語 / 表3: 25作品 / 表4: 4項目 を同期"
