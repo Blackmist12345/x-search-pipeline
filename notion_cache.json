@@ -60,6 +60,14 @@
   ],
   "excludes": [
     {
+      "page_id": "3f244c31-6154-80ab-b3e0-f166a4e83f9d",
+      "word": "女装男子",
+      "category": "アイドル・夜職",
+      "is_pin": false,
+      "status": "2段目待機",
+      "score": 0.0
+    },
+    {
       "page_id": "3f144c31-6154-806c-a2e5-de232b4827b6",
       "word": "撮影会",
       "category": "イベント",
@@ -992,8 +1000,8 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-07T22:01:35.878892+00:00",
+  "cached_at": "2026-10-07T23:01:38.815796+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
-  "config_status_detail": "表1: 13語 / 表2: 112語 / 表3: 25作品 / 表4: 4項目 を同期"
+  "config_status_detail": "表1: 13語 / 表2: 113語 / 表3: 25作品 / 表4: 4項目 を同期"
 }
