@@ -345,7 +345,7 @@
       "category": "物販・譲渡",
       "is_pin": false,
       "status": "2段目待機",
-      "score": 0.0
+      "score": 1.0
     },
     {
       "page_id": "3eb44c31-6154-814e-9a57-f2623c69010e",
@@ -992,7 +992,7 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-07T12:31:29.584353+00:00",
+  "cached_at": "2026-10-07T13:01:26.827892+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
   "config_status_detail": "表1: 13語 / 表2: 112語 / 表3: 25作品 / 表4: 4項目 を同期"
