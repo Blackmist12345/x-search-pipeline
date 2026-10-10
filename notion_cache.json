@@ -1000,7 +1000,7 @@
     "埼玉県",
     "千葉県"
   ],
-  "cached_at": "2026-10-10T22:01:15.788869+00:00",
+  "cached_at": "2026-10-10T23:01:26.953616+00:00",
   "config_source": "notion_api",
   "config_status_badge": "🟢 Notion API 正常取得 (リアルタイム反映)",
   "config_status_detail": "表1: 13語 / 表2: 113語 / 表3: 25作品 / 表4: 4項目 を同期"
